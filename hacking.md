@@ -58,16 +58,16 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now dns-hourly-export.timer
 ```
 
-**Manual run (last completed local hour):**
+**Manual run (this clock hour so far,** start of the hour through now — default for ad-hoc use):
 
 ```bash
 sudo /usr/local/lib/dns-proxmox-audit/dns-hourly-export.py
 ```
 
-**This clock hour so far (start of the hour through now),** e.g. to test before the hour rolls over:
+**Last completed local hour** (same as the timer service):
 
 ```bash
-sudo /usr/local/lib/dns-proxmox-audit/dns-hourly-export.py --through-now
+sudo /usr/local/lib/dns-proxmox-audit/dns-hourly-export.py --previous-hour
 ```
 
 **Time zone for filenames:** the script uses `datetime.now().astimezone().tzinfo` when `--timezone local` (default). For a named zone: `--timezone Europe/Berlin`.
