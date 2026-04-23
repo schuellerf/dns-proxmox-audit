@@ -36,6 +36,9 @@ ansible-playbook -i "$TARGET_HOST," -b -K ansible/dns-audit-pull-merge.yml -e dn
 
 Before running **resolve** step, review **`names-review.txt`**, **`apt-names.txt`**, **`ntp.txt`**, and (if you use the set in rules) **`dns-ips.txt`**
 
+⚠️ Comment out any entries in **`names-review.txt`** that you do not want to allow by
+just adding a `#` at the beginning of the line.
+
 Before running **deploy** step, review the merged **`.pve-fw-merged.NNN.fw`** and make sure the **`[RULES]`** section is correct.
 
 ```bash

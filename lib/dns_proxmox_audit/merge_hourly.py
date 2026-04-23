@@ -6,7 +6,12 @@ import argparse
 import sys
 from pathlib import Path
 
-from .names import load_hourly, write_names_review
+from .names import (
+    load_hourly,
+    load_names_review_merge_state,
+    merge_names_review_hourly,
+    write_names_review,
+)
 
 
 def main() -> int:
@@ -23,11 +28,24 @@ def main() -> int:
         print(f"not a directory: {d}", file=sys.stderr)
         return 1
     last = load_hourly(d)
-    if not last:
-        print("warning: no names merged (empty or no matching files)", file=sys.stderr)
     out = d / "names-review.txt"
-    write_names_review(out, last)
-    print(f"Wrote {out} ({len(last)} names)")
+    previous = (
+        load_names_review_merge_state(out) if out.is_file() else {}
+    )
+    merged = merge_names_review_hourly(last, previous)
+    if not last:
+        if not previous:
+            print(
+                "warning: no names merged (empty or no matching files)",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "warning: no names from hourly files; names-review kept from existing file only",
+                file=sys.stderr,
+            )
+    write_names_review(out, merged)
+    print(f"Wrote {out} ({len(merged)} names)")
     return 0
 
 

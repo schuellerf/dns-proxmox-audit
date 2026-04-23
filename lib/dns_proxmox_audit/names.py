@@ -6,8 +6,10 @@ import ipaddress
 import re
 import socket
 import sys
+from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import NamedTuple
 
 # Matches audit_export_common.filename_for_hour_start: YYYYMMDDHH+oooo-dns-names.txt
 _HOURLY_FNAME = re.compile(r"^(\d{10})([+-]\d{4})-dns-names\.txt$")
@@ -16,6 +18,11 @@ _NAMES_REVIEW_MARKER = " # last request: "
 
 # SRV QNAMEs (e.g. apt mirror discovery): not used for direct A/AAAA egress allowlists.
 _SRV_QNAME_PREFIX = re.compile(r"^_[a-z0-9-]+\._(tcp|udp)\.", re.IGNORECASE)
+
+
+class NamesReviewEntry(NamedTuple):
+    last_request: datetime
+    commented_out: bool
 
 
 def is_allowlist_relevant_name(name: str) -> bool:
@@ -85,21 +92,16 @@ def load_hourly(input_dir: Path) -> dict[str, datetime]:
     return last
 
 
-def load_names_review(path: Path) -> dict[str, datetime]:
-    """Parse names-review.txt lines into FQDN -> last-request instant."""
-    last: dict[str, datetime] = {}
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError as e:
-        print(f"read {path}: {e}", file=sys.stderr)
-        return last
-    for line in text.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
+def _iter_names_review_parsed(lines: list[str]) -> Iterator[tuple[str, datetime, bool]]:
+    for raw in lines:
+        line = raw.strip()
+        if not line:
             continue
-        if _NAMES_REVIEW_MARKER not in line:
+        commented_out = line.startswith("#")
+        body = line[1:].lstrip() if commented_out else line
+        if _NAMES_REVIEW_MARKER not in body:
             continue
-        name, ts_part = line.split(_NAMES_REVIEW_MARKER, 1)
+        name, ts_part = body.split(_NAMES_REVIEW_MARKER, 1)
         name = name.strip().lower().rstrip(".")
         ts_s = ts_part.strip()
         if not name or "." not in name:
@@ -110,14 +112,59 @@ def load_names_review(path: Path) -> dict[str, datetime]:
             ts = datetime.strptime(ts_s, "%Y%m%d%H%z")
         except ValueError:
             continue
-        last[name] = ts
+        yield name, ts, commented_out
+
+
+def load_names_review(path: Path) -> dict[str, datetime]:
+    """Parse names-review.txt lines into FQDN -> last-request instant."""
+    last: dict[str, datetime] = {}
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        print(f"read {path}: {e}", file=sys.stderr)
+        return last
+    for name, ts, commented_out in _iter_names_review_parsed(text.splitlines()):
+        if not commented_out:
+            last[name] = ts
     return last
 
 
-def write_names_review(path: Path, last: dict[str, datetime]) -> None:
-    lines = [
-        f"{n} # last request: {format_last_request(last[n])}" for n in sorted(last)
-    ]
+def load_names_review_merge_state(path: Path) -> dict[str, NamesReviewEntry]:
+    """Parse names-review.txt including commented-out lines (FQDN -> entry)."""
+    out: dict[str, NamesReviewEntry] = {}
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        print(f"read {path}: {e}", file=sys.stderr)
+        return out
+    for name, ts, commented_out in _iter_names_review_parsed(text.splitlines()):
+        out[name] = NamesReviewEntry(ts, commented_out)
+    return out
+
+
+def merge_names_review_hourly(
+    hourly: dict[str, datetime],
+    previous: dict[str, NamesReviewEntry],
+) -> dict[str, NamesReviewEntry]:
+    """Union hourly journal names with prior names-review; hourly supplies timestamps when present."""
+    out: dict[str, NamesReviewEntry] = {}
+    for name, ts in hourly.items():
+        if name in previous:
+            out[name] = NamesReviewEntry(ts, previous[name].commented_out)
+        else:
+            out[name] = NamesReviewEntry(ts, False)
+    for name, ent in previous.items():
+        if name not in out:
+            out[name] = ent
+    return out
+
+
+def write_names_review(path: Path, entries: dict[str, NamesReviewEntry]) -> None:
+    lines: list[str] = []
+    for n in sorted(entries):
+        ent = entries[n]
+        body = f"{n} # last request: {format_last_request(ent.last_request)}"
+        lines.append(f"#{body}" if ent.commented_out else body)
     data = "\n".join(lines) + ("\n" if lines else "")
     path.write_text(data, encoding="utf-8")
 
