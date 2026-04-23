@@ -1,10 +1,9 @@
 ---
-# This play connects to the audit target over SSH; controller-only work uses delegate_to: localhost.
-# -e dns_target_host=TARGET_SSH  (or deprecated -e dns_journal_host=…) — required; must be the name you can ssh to
-# -e dns_merge_emit_pve=false  # names list only, no getaddrinfo on the controller
-# -e dns_merge_python=/usr/bin/python3  # merge step runs on the controller (overrides pyenv shims, etc.)
-# SSH options for the play connection: -e ansible_ssh_private_key_file=…, -e dns_audit_ssh_common_args='-o …'
-# (defaults include BatchMode and StrictHostKeyChecking=accept-new; override dns_audit_ssh_common_args for password auth, etc.)
+# Run static-endpoints on the play host, rsync audit dir to `.pulled-audit/`, run merge/resolve on the controller.
+# -e dns_target_host=… or -e dns_journal_host=…
+# -e dns_merge_emit_pve=false (names only)
+# -e dns_merge_python=…
+# -e ansible_ssh_private_key_file=… -e dns_audit_ssh_common_args=…
 - name: Pull dns names and merge
   hosts: "{% if dns_target_host is defined and dns_target_host | string | length > 0 %}{{ dns_target_host }}{% elif dns_journal_host is defined and dns_journal_host | string | length > 0 %}{{ dns_journal_host }}{% else %}__set_dns_target_host__{% endif %}"
   gather_facts: false
@@ -21,19 +20,22 @@
           - (dns_target_host is defined and dns_target_host | string | length > 0)
             or (dns_journal_host is defined and dns_journal_host | string | length > 0)
         fail_msg: "Set -e dns_target_host=TARGET_SSH (or deprecated dns_journal_host) to the audit host; it must be your SSH name for that system."
+      become: false
 
     - name: Ensure local pull directory
       ansible.builtin.file:
         path: "{{ dns_audit_local_pull }}"
         state: directory
         mode: "0750"
+      become: false
       delegate_to: localhost
       connection: local
 
-    - name: Save user and host for controller rsync (delegate_to localhost avoids ansible_host/ssh_user ambiguity)
+    - name: Save user and host for controller rsync
       ansible.builtin.set_fact:
         _dns_rsync_user: "{{ (dns_audit_rsync_user | default(ansible_user, true) | default(lookup('env', 'USER'), true) | string) }}"
         _dns_rsync_host: "{{ ansible_host | default(inventory_hostname) }}"
+      become: false
 
     - name: Refresh static APT and NTP host lists on target host
       ansible.builtin.command:
@@ -55,6 +57,7 @@
           - "{{ _dns_rsync_user }}@{{ _dns_rsync_host }}:{{ dns_audit_fetch_src | default('/var/lib/dns-audit', true) }}/"
           - "{{ dns_audit_local_pull }}/"
       changed_when: true
+      become: false
       delegate_to: localhost
       connection: local
 
@@ -69,6 +72,7 @@
           - "{{ dns_audit_names_review | default(dns_audit_root + '/.names-review.txt') }}"
       when: not (dns_merge_emit_pve | default(true) | bool)
       changed_when: true
+      become: false
       delegate_to: localhost
       connection: local
 
@@ -77,6 +81,7 @@
         argv: "{{ _argv }}"
       when: dns_merge_emit_pve | default(true) | bool
       changed_when: true
+      become: false
       delegate_to: localhost
       connection: local
       vars:
