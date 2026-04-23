@@ -2,7 +2,7 @@
 
 This project intends to learn which DNS names a machine actually queries over time, turn that into a **reviewed list of IP addresses** on a trusted host, and feed that into a **Proxmox VM outgoing firewall** so you can **tighten policy—mainly for outgoing traffic** (permitted destination IPs on allowed outgoing rules) instead of a wide open egress path.
 
-**Developed and tested on Ubuntu** (Debian family with `systemd-resolved` and the apt layout and paths assumed here; other distros are untested and may need adaptation.)
+**Developed and tested for an Ubuntu target** (Debian family with `systemd-resolved` and the apt layout and paths assumed here; other distros are untested and may need adaptation.)
 
 **Three steps:**
 
@@ -34,6 +34,8 @@ ansible-playbook -i "$TARGET_HOST," -b -K ansible/dns-audit-pull-merge.yml -e dn
 
 **3. Proxmox** — **resolve** (fetch **`.fw`**, DNS staging, local merge) and **deploy** (upload merged **`.fw`** only):
 
+Before running this step, review **`names-review.txt`**, **`apt-names.txt`** and **`ntp.txt`**
+
 ```bash
 ansible-playbook -i "$PVE_HOST," -b -K ansible/proxmox-update-allowed-ips.yml --tags resolve \
   -e pve_vmid=100
@@ -44,7 +46,6 @@ ansible-playbook -i "$PVE_HOST," -b -K ansible/proxmox-update-allowed-ips.yml --
 
 Guest firewall path on the node defaults to **`/etc/pve/firewall/<pve_vmid>.fw`** (default **`pve_vmid`**: 100). Override the path with **`-e pve_vm_fw=/path/to/guest.fw`** if needed.
 
-Default paths under the repo include **`names-review.txt`**, **`apt-names.txt`**, **`ntp.txt`**, **`.pve-apt-names-staged.txt`**, **`.pve-ntp-names-staged.txt`**, **`.pve-allowed-staged.txt`** (reviewed-names), **`.pve-fw.fetched.<vmid>.fw`**, and **`.pve-fw-merged.<vmid>.fw`** (fetched, merged, and staged files are gitignored). Use **`-e dns_resolve_ipv4_only=true`** on **resolve** if you want IPv4 only. Override resolve inputs with **`-e dns_audit_names_review=…`**, **`-e dns_audit_apt_names=…`**, **`-e dns_audit_ntp_names=…`**, staged outputs with **`dns_audit_pve_staged_apt`**, **`dns_audit_pve_staged_ntp`**, **`dns_audit_pve_staged_reviewed`**, or merged output with **`dns_audit_pve_merged_fw=…`**. The guest **`.fw`** must already exist on the node before the first **resolve** (create/enable guest firewall in Proxmox if needed). Fetch in step 2 uses **`become`** so the controller can read **`/var/lib/dns-audit`** (mode `0750`).
 
 More detail: [INSTALL.md](INSTALL.md). Manual steps: [hacking.md](hacking.md).
 
@@ -55,7 +56,7 @@ To actually use the generated lists for **outgoing** rules toward mirrors and ti
 - **APT / HTTP(S) mirrors:** allow outbound **TCP 443** (HTTPS) and, if you still have plain HTTP sources, **TCP 80** to the relevant hosts. Name resolution to those hosts also needs **DNS (UDP/53 and often TCP/53 to the resolver you use).**
 - **NTP:** allow outbound **UDP 123** to the configured NTP pool or `server` hostnames/addresses (NTP and SNTP are conventionally on UDP/123; chrony and systemd-timesyncd use that path).
 
-Tighten source/destination in your own firewall; this repo only helps you list destination names/IPs to review.
+Tighten source/destination in your own firewall; this repo only helps you list destination names/IPs to review and update regularly.
 
 ## License
 
