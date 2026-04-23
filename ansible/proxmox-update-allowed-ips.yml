@@ -1,10 +1,11 @@
 ---
-# Proxmox node only: install the IPSET merge helper script.
-# Run explicitly when needed; does not enable services, timers, or any automation.
-# From repo root: ansible-playbook -i 'PVE_HOST,' -b -K ansible/proxmox-update-allowed-ips.yml
-- name: Install proxmox-update-allowed-ips helper
+# PVE: install helper (tags: install) and/or deploy a reviewed staged file (tags: deploy).
+# Deploy: -e dns_audit_pve_staged_file=/path/on/controller -i 'PVE,'
+# Staged file is IP # name last request: ... from dns-resolve-and-stage-for-pve.py
+- name: Install proxmox-update-allowed-ips on node
   hosts: all
   become: true
+  tags: [install]
   vars:
     dns_audit_root: "{{ playbook_dir | dirname }}"
 
@@ -20,3 +21,45 @@
         src: "{{ dns_audit_root }}/lib/proxmox-update-allowed-ips.py"
         dest: /usr/local/lib/dns-proxmox-audit/proxmox-update-allowed-ips.py
         mode: "0755"
+
+- name: Apply staged IPs to guest firewall
+  hosts: all
+  become: true
+  tags: [deploy]
+  vars:
+    pve_staged_on_node: /var/tmp/dns-allowed-pve-staged.txt
+    _pve_fw: "{{ pve_vm_fw | default('/etc/pve/firewall/100.fw') }}"
+
+  tasks:
+    - name: Copy staged file to PVE
+      when: dns_audit_pve_staged_file is defined
+      ansible.builtin.copy:
+        src: "{{ dns_audit_pve_staged_file }}"
+        dest: "{{ pve_staged_on_node }}"
+        mode: "0600"
+
+    - name: Merge into Proxmox firewall file
+      when: dns_audit_pve_staged_file is defined
+      ansible.builtin.command:
+        argv:
+          - python3
+          - /usr/local/lib/dns-proxmox-audit/proxmox-update-allowed-ips.py
+          - --firewall
+          - "{{ _pve_fw }}"
+          - --input
+          - "{{ pve_staged_on_node }}"
+      register: _merge
+      changed_when: _merge.rc == 0
+      failed_when: _merge.rc != 0
+
+    - name: Reload pve-firewall
+      when: dns_audit_pve_staged_file is defined
+      ansible.builtin.command:
+        cmd: systemctl reload pve-firewall
+      changed_when: true
+      failed_when: false
+
+    - name: Deploy play skipped (set dns_audit_pve_staged_file to apply)
+      when: dns_audit_pve_staged_file is not defined
+      ansible.builtin.debug:
+        msg: No dns_audit_pve_staged_file; deploy tasks were skipped. Use --tags deploy -e dns_audit_pve_staged_file=...

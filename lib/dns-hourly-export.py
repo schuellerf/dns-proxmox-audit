@@ -1,35 +1,27 @@
 #!/usr/bin/env python3
-"""Export the previous local hour of systemd-resolved journal to a deduplicated file."""
+"""Export the previous local hour of systemd-resolved journal: FQDNs only (no IPs; trust merge on a controller)."""
 
 from __future__ import annotations
 
 import argparse
-import ipaddress
 import os
 import re
 import subprocess
 import sys
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+OUT_SUFFIX = "dns-names.txt"
 
-TAG = "systemd-resolved"
-OUT_SUFFIX = "dns-requests.txt"
-
-# Tuned to common systemd-resolved debug phrasing; extend after journalctl -u … -n 500
+# Name-only: capture qnames; never copy answer RDATA into output
 _LINE_PATTERNS: list[re.Pattern[str]] = [
     re.compile(
-        r"(?P<name>[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?)"
-        r"(?:\*)?"
-        r":\s*IN AAAA?\s*(?P<addr>\S+)"
+        r"(?P<name>[a-zA-Z0-9*](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?)"
+        r":\s*IN AAAA?"
     ),
     re.compile(
-        r"IN AAAA?\s+(?P<name>[^\s;]+?)\s+(?P<addr>\S+)"
-    ),
-    re.compile(
-        r"(?P<name>[^\s#]+?)\b.*\b(?P<addr>(?:\d{1,3}\.){3}\d{1,3})\b"
+        r"IN AAAA?\s+(?P<name>[^\s#;]+)"
     ),
 ]
 
@@ -39,15 +31,6 @@ _FQDN = re.compile(
     r"(?:[a-zA-Z0-9_-]{1,63}\.)*[a-zA-Z]{2,63})"
     r"(?![0-9A-Za-z._-])"
 )
-_IP4 = re.compile(
-    r"(?<![0-9.])(?P<ip>(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}"
-    r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))(?![0-9.])"
-)
-_IP6 = re.compile(
-    r"(?P<ip>(?:(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4})|"
-    r"(?:(?:[0-9a-fA-F]{1,4}:)*::[0-9a-fA-F:]{0,})|(?:::)))"
-)
-# Only apply substring filter when the journal is not pre-filtered (full debug)
 _DEFAULT_LINE_SUBSTR = (
     "IN A",
     "IN AAAA",
@@ -61,66 +44,12 @@ _DEFAULT_LINE_SUBSTR = (
 )
 
 
-def _parse_ip(token: str) -> str | None:
-    t = token.strip().strip("()[];,")
-    if t.endswith("."):
-        t = t[:-1]
-    for candidate in (t, f"[{t}]" if ":" in t and "[" not in t else t):
-        try:
-            return str(ipaddress.ip_address(candidate.strip("[]")))
-        except ValueError:
-            continue
-    return None
-
-
-@dataclass(frozen=True)
-class _Pair:
-    ip: str
-    name: str
-
-    def line(self) -> str:
-        n = _normalize_name(self.name)
-        return f"{self.ip} # {n} ({TAG})"
-
-
 def _normalize_name(name: str) -> str:
     n = name.strip().rstrip(".").lower()
     if n.endswith("*)"):
         n = n[:-2]
     n = n.replace("\\032", " ").split()[0] if n else n
     return n or name
-
-
-def extract_pairs_from_line(text: str) -> set[_Pair]:
-    out: set[_Pair] = set()
-    for pat in _LINE_PATTERNS:
-        for m in pat.finditer(text):
-            try:
-                addr = _parse_ip(m.group("addr"))
-                name = m.group("name")
-            except (IndexError, KeyError):
-                continue
-            if addr and name:
-                n = _normalize_name(name)
-                if _is_plausible_fqdn(n) or n.count(".") >= 1:
-                    out.add(_Pair(ip=addr, name=n))
-    if out:
-        return out
-    ips4 = [_parse_ip(m.group("ip")) for m in _IP4.finditer(text)]
-    ips4 = [i for i in ips4 if i]
-    ips6: list[str] = []
-    for m6 in _IP6.finditer(text):
-        ip = _parse_ip(m6.group("ip"))
-        if ip and ":" in ip:
-            ips6.append(ip)
-    all_ips = ips4 + ips6
-    fq = [_normalize_name(m.group(1)) for m in _FQDN.finditer(text)]
-    fq = [f for f in fq if _is_plausible_fqdn(f)]
-    if len(fq) == 1 and all_ips:
-        name0 = fq[0]
-        for ip in all_ips:
-            out.add(_Pair(ip=ip, name=name0))
-    return out
 
 
 def _is_plausible_fqdn(name: str) -> bool:
@@ -131,6 +60,24 @@ def _is_plausible_fqdn(name: str) -> bool:
     if name.count(".") < 1:
         return False
     return True
+
+
+def extract_names_from_line(text: str) -> set[str]:
+    out: set[str] = set()
+    for pat in _LINE_PATTERNS:
+        for m in pat.finditer(text):
+            try:
+                name = m.group("name")
+            except (IndexError, KeyError):
+                continue
+            n = _normalize_name(name)
+            if _is_plausible_fqdn(n) or n.count(".") >= 1:
+                out.add(n)
+    for m in _FQDN.finditer(text):
+        n = _normalize_name(m.group(1))
+        if _is_plausible_fqdn(n):
+            out.add(n)
+    return out
 
 
 def _journal_message_lines(
@@ -177,10 +124,6 @@ def _previous_hour_range(tz: datetime.tzinfo) -> tuple[datetime, datetime]:
 
 
 def _offset_in_filename(dt: datetime) -> str:
-    """UTC offset at this instant (DST-aware), from strftime %z (e.g. +0100, -0500).
-
-    Plus and minus are valid in Unix filenames, so the value is not mangled.
-    """
     off = dt.strftime("%z")
     return off if off else "+0000"
 
@@ -202,8 +145,8 @@ def run_export(
     lines = _filter_substrings(lines, substr, no_substr_filter)
     out_lines: set[str] = set()
     for line in lines:
-        for pair in extract_pairs_from_line(line):
-            out_lines.add(pair.line())
+        for n in extract_names_from_line(line):
+            out_lines.add(n)
     out_dir = output_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     name = _filename_for_start_hour(start)
@@ -232,10 +175,7 @@ def main() -> None:
         "--output-dir",
         type=Path,
         default=Path("/var/lib/dns-audit"),
-        help=(
-            f"Directory for hourly files: YYYYMMDDHH_<+HHMM|-HHMM|+0000>-{OUT_SUFFIX} "
-            "(%%z at hour start; +0000 if strftime has no offset; DST-aware)"
-        ),
+        help=f"Directory for YYYYMMDDHH_+oooo-{OUT_SUFFIX} (%%z at hour start)",
     )
     ap.add_argument(
         "--since",
@@ -248,7 +188,7 @@ def main() -> None:
     ap.add_argument(
         "--timezone",
         default="local",
-        help="Zone name for the default previous hour (e.g. Europe/Berlin). 'local' uses the system local zone.",
+        help="Zone for default previous hour (e.g. Europe/Berlin). 'local' = system local.",
     )
     ap.add_argument(
         "-u",

@@ -42,7 +42,7 @@ If the unit fails (unknown `LogFilterPatterns=` on older systemd): install [10-d
 
 **Output directory (hourly files):** `/var/lib/dns-audit/`
 
-**Filename pattern:** e.g. `2026032914_+0100-dns-requests.txt`: wall-clock **start** of the hour, `_`, then `strftime("%z")` for that instant (`+0100`, `-0500`, …). If `%z` is empty, the code uses `+0000`. DST is in the offset segment.
+**Filename pattern:** e.g. `2026032914_+0100-dns-names.txt`: wall-clock **start** of the hour, `_`, then `strftime("%z")`. Each file lists **one FQDN per line** (no IPs; used for names-seen-only audit).
 
 **Commands:**
 
@@ -66,9 +66,22 @@ sudo /usr/local/lib/dns-proxmox-audit/dns-hourly-export.py --output-dir /var/lib
 
 **Time zone for filenames:** the script uses `datetime.now().astimezone().tzinfo` when `--timezone local` (default). For a named zone: `--timezone Europe/Berlin`.
 
+## Part 2b — Controller: pull, merge, resolve (trusted)
+
+On the machine where you trust DNS (Ansible controller), copy or `rsync` `/var/lib/dns-audit/` from the journal host, then run [lib/dns-resolve-and-stage-for-pve.py](lib/dns-resolve-and-stage-for-pve.py):
+
+```bash
+python3 lib/dns-resolve-and-stage-for-pve.py \
+  --input-dir ./pulled-audit \
+  --names-review ./names-review.txt \
+  --emit-pve --pve-staged ./pve-allowed-staged.txt
+```
+
+Review `names-review.txt` (`name # last request: YYYYMMDDHH+0100`), then edit `pve-allowed-staged.txt` if needed (IP # name last request: …). Or use [ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) (see [INSTALL.md](INSTALL.md)).
+
 ## Part 3 — Proxmox guest firewall (run on a Proxmox node)
 
-The helper can be installed with `ansible-playbook` and [ansible/proxmox-update-allowed-ips.yml](ansible/proxmox-update-allowed-ips.yml) (see [INSTALL.md](INSTALL.md)), or with `install` / copy as below.
+Install the helper with [ansible/proxmox-update-allowed-ips.yml](ansible/proxmox-update-allowed-ips.yml) `--tags install`, or copy the script as below. **Apply** a reviewed staged file with `--tags deploy` and `-e dns_audit_pve_staged_file=...` (see [INSTALL.md](INSTALL.md)); that run also does `systemctl reload pve-firewall` (errors ignored if the unit does not support reload).
 
 | Repository file | Install to (example) |
 | --- | --- |
@@ -100,5 +113,5 @@ cat approved-lines.txt | sudo /usr/local/lib/dns-proxmox-audit/proxmox-update-al
 - `/etc/systemd/system/dns-hourly-export.service`
 - `/etc/systemd/system/dns-hourly-export.timer`
 - `/etc/tmpfiles.d/dns-audit.conf`
-- `/var/lib/dns-audit/` (hourly `…_+0100-…` / `…_-0500-…` — see filename pattern above)
+- `/var/lib/dns-audit/` (hourly `…-dns-names.txt`)
 - `/etc/pve/firewall/<VMID>.fw` (Proxmox)

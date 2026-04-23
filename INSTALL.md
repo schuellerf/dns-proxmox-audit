@@ -1,10 +1,10 @@
 # DNS audit + Proxmox `allowed-ips` — install
 
-**Journal audit host** ([ansible/dns-audit.yml](ansible/dns-audit.yml)): `systemd-resolved` + journald limits, hourly export to `/var/lib/dns-audit/`. **Proxmox node** (optional, separate play): only the firewall helper script; run it when you want that file on a PVE host — it does not start any service or timer there.
+**Trust model:** the **journal host** only writes **FQDNs** per hour (`*dns-names.txt`). IPs for the firewall are **never** taken from journal answers. You **rsync** those files to the **Ansible controller**, run [lib/dns-resolve-and-stage-for-pve.py](lib/dns-resolve-and-stage-for-pve.py) there (DNS = controller’s resolver), **review** output, then deploy to Proxmox.
 
-**Prerequisites:** `ansible-playbook` on the control node; SSH and `become` to each target as usual.
+**Prerequisites:** `ansible-playbook`, SSH to the journal host and (separately) to the PVE node; `rsync` over SSH for the pull playbook.
 
-### Journal audit (`dns-audit.yml`)
+### 1. Journal host — [ansible/dns-audit.yml](ansible/dns-audit.yml)
 
 | Source (in this repo) | On the target host |
 | --- | --- |
@@ -14,20 +14,44 @@
 | [systemd/dns-hourly-export.service](systemd/dns-hourly-export.service), [systemd/dns-hourly-export.timer](systemd/dns-hourly-export.timer) | `/etc/systemd/system/` |
 | [systemd/tmpfiles.d/dns-audit.conf](systemd/tmpfiles.d/dns-audit.conf) | `/etc/tmpfiles.d/dns-audit.conf` |
 
+Hourly files under `/var/lib/dns-audit/` look like `YYYYMMDDHH_+0100-dns-names.txt` (one FQDN per line).
+
 ```bash
 cd /path/to/dns-proxmox-audit
 ansible-playbook -i 'JOURNAL_HOST,' -b -K ansible/dns-audit.yml
 ```
 
-### Proxmox helper only (`proxmox-update-allowed-ips.yml`)
+### 2. Controller — pull, merge, resolve — [ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml)
 
-| Source | On the Proxmox node |
-| --- | --- |
-| [lib/proxmox-update-allowed-ips.py](lib/proxmox-update-allowed-ips.py) | `/usr/local/lib/dns-proxmox-audit/proxmox-update-allowed-ips.py` |
+Uses `rsync` from `JOURNAL_HOST` to `dns-proxmox-audit/.pulled-audit/`, then runs the merge script. Writes `.names-review.txt` and (by default) `.pve-allowed-staged.txt` next to the repo.
 
 ```bash
 cd /path/to/dns-proxmox-audit
-ansible-playbook -i 'PVE_HOST,' -b -K ansible/proxmox-update-allowed-ips.yml
+ansible-playbook ansible/dns-audit-pull-merge.yml -e dns_journal_host=JOURNAL_HOST
 ```
 
-Manual `install` / `systemctl` and CLI examples: [hacking.md](hacking.md).
+- `-e dns_merge_emit_pve=false` — names-only list, no `getaddrinfo` on the controller.
+- `-e dns_merge_ipv4_only=true` — only IPv4 when resolving.
+
+### 3. Proxmox — [ansible/proxmox-update-allowed-ips.yml](ansible/proxmox-update-allowed-ips.yml)
+
+| Step | Tag |
+| --- | --- |
+| Install `proxmox-update-allowed-ips.py` on the node | `install` |
+| Copy **reviewed** staged file from the controller, merge into `pve_vm_fw`, `systemctl reload pve-firewall` | `deploy` |
+
+Install once:
+
+```bash
+ansible-playbook -i 'PVE_HOST,' -b -K ansible/proxmox-update-allowed-ips.yml --tags install
+```
+
+Deploy after you have edited/approved the staged file on the controller:
+
+```bash
+ansible-playbook -i 'PVE_HOST,' -b -K ansible/proxmox-update-allowed-ips.yml --tags deploy \
+  -e dns_audit_pve_staged_file=/path/to/dns-proxmox-audit/.pve-allowed-staged.txt \
+  -e pve_vm_fw=/etc/pve/firewall/100.fw
+```
+
+Manual steps and fallbacks: [hacking.md](hacking.md).

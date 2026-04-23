@@ -1,0 +1,64 @@
+---
+# Run on the Ansible controller: rsync from journal host, merge *dns-names.txt, optional resolve to IPs.
+# -e dns_journal_host=JOURNAL_SSH
+# -e dns_merge_emit_pve=false  # names list only, no getaddrinfo on this host
+- name: Pull dns names and merge
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars:
+    dns_audit_root: "{{ playbook_dir | dirname }}"
+    dns_audit_local_pull: "{{ dns_audit_root }}/.pulled-audit"
+    dns_audit_fetch_src: "{{ dns_audit_fetch_src | default('/var/lib/dns-audit') }}"
+
+  tasks:
+    - name: Assert dns_journal_host
+      ansible.builtin.assert:
+        that:
+          - dns_journal_host is defined
+        fail_msg: "Set -e dns_journal_host=THE_JOURNAL_SSH"
+
+    - name: Ensure local pull directory
+      ansible.builtin.file:
+        path: "{{ dns_audit_local_pull }}"
+        state: directory
+        mode: "0750"
+
+    - name: Rsync from journal host
+      ansible.builtin.command:
+        argv:
+          - rsync
+          - -az
+          - "{{ (dns_audit_rsync_user | default(ansible_user, true)) | default(lookup('env', 'USER'), true) | string }}@{{ dns_journal_host }}:{{ dns_audit_fetch_src }}/"
+          - "{{ dns_audit_local_pull }}/"
+      changed_when: true
+
+    - name: Merge to names review only
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ dns_audit_root }}/lib/dns-resolve-and-stage-for-pve.py"
+          - --input-dir
+          - "{{ dns_audit_local_pull }}"
+          - --names-review
+          - "{{ dns_audit_names_review | default(dns_audit_root + '/.names-review.txt') }}"
+      when: not (dns_merge_emit_pve | default(true) | bool)
+      changed_when: true
+
+    - name: Merge, resolve, write PVE staged
+      ansible.builtin.command:
+        argv: "{{ _argv }}"
+      vars:
+        _base:
+          - python3
+          - "{{ dns_audit_root }}/lib/dns-resolve-and-stage-for-pve.py"
+          - --input-dir
+          - "{{ dns_audit_local_pull }}"
+          - --names-review
+          - "{{ dns_audit_names_review | default(dns_audit_root + '/.names-review.txt') }}"
+          - --emit-pve
+          - --pve-staged
+          - "{{ dns_audit_pve_staged | default(dns_audit_root + '/.pve-allowed-staged.txt') }}"
+        _argv: "{{ _base + (['--ipv4-only'] if (dns_merge_ipv4_only | default(false) | bool) else []) }}"
+      when: dns_merge_emit_pve | default(true) | bool
+      changed_when: true

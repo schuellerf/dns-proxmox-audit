@@ -178,7 +178,11 @@ def main() -> int:
     ap.add_argument(
         "--no-compile",
         action="store_true",
-        help="Do not run pve-firewall compile (e.g. on a dev box without PVE tools)",
+        help=(
+            "Do not run pve-firewall compile. When deploying via Ansible, the playbook "
+            "can run the script with compile, then systemctl reload pve-firewall; use this "
+            "for dry runs without PVE tools."
+        ),
     )
     args = ap.parse_args()
     staged = args.input.read_text() if args.input else sys.stdin.read()
