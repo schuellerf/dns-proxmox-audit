@@ -1,7 +1,31 @@
 ---
-# PVE: install helper (tags: install) and/or deploy a reviewed staged file (tags: deploy).
-# Deploy: -e dns_audit_pve_staged_file=/path/on/controller -i 'PVE,'
-# Staged file is IP # name last request: ... from dns-resolve-and-stage-for-pve.py
+# Step 3: resolve reviewed names on the controller, then deploy to PVE.
+# Typical: ansible-playbook --tags resolve,deploy -i 'PVE,' ansible/proxmox-update-allowed-ips.yml
+# -e dns_resolve_ipv4_only=true — IPv4 only for getaddrinfo
+# -e dns_audit_pve_staged_file=… — override staged IP list path (default repo /.pve-allowed-staged.txt)
+# -e dns_audit_names_review=… -e dns_audit_pve_staged=… — paths for resolve step (defaults .names-review.txt / .pve-allowed-staged.txt under repo)
+# Staged file format: IP # name last request: … (from dns-resolve-names-for-pve.py)
+- name: Resolve names-review to PVE staged file (localhost)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [resolve]
+  vars:
+    dns_audit_root: "{{ playbook_dir | dirname }}"
+    dns_audit_names_review: "{{ dns_audit_root }}/.names-review.txt"
+    dns_audit_pve_staged: "{{ dns_audit_root }}/.pve-allowed-staged.txt"
+
+  tasks:
+    - name: Build .pve-allowed-staged.txt from reviewed names
+      ansible.builtin.command:
+        argv: "{{ _resolve_argv }}"
+      args:
+        chdir: "{{ dns_audit_root }}"
+      changed_when: true
+      vars:
+        _py: "{{ ansible_python_interpreter | default('/usr/bin/python3') }}"
+        _resolve_argv: "{{ [_py, dns_audit_root + '/lib/dns-resolve-names-for-pve.py', '--names-review', dns_audit_names_review, '--pve-staged', dns_audit_pve_staged] + (['--ipv4-only'] if (dns_resolve_ipv4_only | default(false) | bool) else []) }}"
+
 - name: Install proxmox-update-allowed-ips on node
   hosts: all
   become: true
@@ -27,19 +51,19 @@
   become: true
   tags: [deploy]
   vars:
+    dns_audit_root: "{{ playbook_dir | dirname }}"
+    dns_audit_pve_staged_file: "{{ dns_audit_root }}/.pve-allowed-staged.txt"
     pve_staged_on_node: /var/tmp/dns-allowed-pve-staged.txt
     _pve_fw: "{{ pve_vm_fw | default('/etc/pve/firewall/100.fw') }}"
 
   tasks:
     - name: Copy staged file to PVE
-      when: dns_audit_pve_staged_file is defined
       ansible.builtin.copy:
         src: "{{ dns_audit_pve_staged_file }}"
         dest: "{{ pve_staged_on_node }}"
         mode: "0600"
 
     - name: Merge into Proxmox firewall file
-      when: dns_audit_pve_staged_file is defined
       ansible.builtin.command:
         argv:
           - python3
@@ -53,13 +77,7 @@
       failed_when: _merge.rc != 0
 
     - name: Reload pve-firewall
-      when: dns_audit_pve_staged_file is defined
       ansible.builtin.command:
         cmd: systemctl reload pve-firewall
       changed_when: true
       failed_when: false
-
-    - name: Deploy play skipped (set dns_audit_pve_staged_file to apply)
-      when: dns_audit_pve_staged_file is not defined
-      ansible.builtin.debug:
-        msg: No dns_audit_pve_staged_file; deploy tasks were skipped. Use --tags deploy -e dns_audit_pve_staged_file=...

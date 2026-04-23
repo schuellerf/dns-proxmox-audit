@@ -1,0 +1,134 @@
+"""Merge hourly DNS name exports and resolve names-review lines for Proxmox staging."""
+
+from __future__ import annotations
+
+import re
+import socket
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+# Matches audit_export_common.filename_for_hour_start: YYYYMMDDHH+oooo-dns-names.txt
+_HOURLY_FNAME = re.compile(r"^(\d{10})([+-]\d{4})-dns-names\.txt$")
+
+_NAMES_REVIEW_MARKER = " # last request: "
+
+
+def parse_hourly_filename(path: Path) -> datetime | None:
+    m = _HOURLY_FNAME.match(path.name)
+    if not m:
+        return None
+    ymdh, off = m.group(1), m.group(2)
+    try:
+        base = datetime.strptime(ymdh, "%Y%m%d%H")
+    except ValueError:
+        return None
+    sign = 1 if off[0] == "+" else -1
+    h, mi = int(off[1:3]), int(off[3:5])
+    delta = sign * (timedelta(hours=h, minutes=mi))
+    return base.replace(tzinfo=timezone(delta))
+
+
+def format_last_request(dt: datetime) -> str:
+    ymdh = dt.strftime("%Y%m%d%H")
+    z = dt.strftime("%z")
+    if not z:
+        return f"{ymdh}+0000"
+    return f"{ymdh}{z}"
+
+
+def load_hourly(input_dir: Path) -> dict[str, datetime]:
+    """FQDN -> latest observed instant from hourly filenames + file contents."""
+    last: dict[str, datetime] = {}
+    for p in sorted(input_dir.iterdir()):
+        if not p.is_file():
+            continue
+        ts = parse_hourly_filename(p)
+        if ts is None:
+            continue
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            print(f"skip {p}: {e}", file=sys.stderr)
+            continue
+        for line in text.splitlines():
+            n = line.strip().lower()
+            if not n or n.startswith("#"):
+                continue
+            n = n.rstrip(".")
+            if not n or "." not in n:
+                continue
+            if n not in last or last[n] < ts:
+                last[n] = ts
+    return last
+
+
+def load_names_review(path: Path) -> dict[str, datetime]:
+    """Parse names-review.txt lines into FQDN -> last-request instant."""
+    last: dict[str, datetime] = {}
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        print(f"read {path}: {e}", file=sys.stderr)
+        return last
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if _NAMES_REVIEW_MARKER not in line:
+            continue
+        name, ts_part = line.split(_NAMES_REVIEW_MARKER, 1)
+        name = name.strip().lower().rstrip(".")
+        ts_s = ts_part.strip()
+        if not name or "." not in name:
+            continue
+        try:
+            ts = datetime.strptime(ts_s, "%Y%m%d%H%z")
+        except ValueError:
+            continue
+        last[name] = ts
+    return last
+
+
+def write_names_review(path: Path, last: dict[str, datetime]) -> None:
+    lines = [
+        f"{n} # last request: {format_last_request(last[n])}" for n in sorted(last)
+    ]
+    data = "\n".join(lines) + ("\n" if lines else "")
+    path.write_text(data, encoding="utf-8")
+
+
+def resolve_name(name: str, ipv4_only: bool) -> tuple[list[str], str | None]:
+    fam0 = socket.AF_INET if ipv4_only else 0
+    try:
+        infos = socket.getaddrinfo(name, None, fam0, socket.SOCK_STREAM)
+    except socket.gaierror as e:
+        return [], str(e)
+    seen: set[str] = set()
+    out: list[str] = []
+    for fam, _, _, _, sa in infos:
+        if fam not in (socket.AF_INET, socket.AF_INET6):
+            continue
+        ip = sa[0]
+        if ip not in seen:
+            seen.add(ip)
+            out.append(ip)
+    return out, None
+
+
+def write_pve_staged(path: Path, last: dict[str, datetime], ipv4_only: bool) -> int:
+    pve_lines: list[str] = []
+    for n in sorted(last):
+        fr = format_last_request(last[n])
+        ips, err = resolve_name(n, ipv4_only)
+        if err:
+            print(f"resolve fail {n}: {err}", file=sys.stderr)
+            continue
+        if not ips:
+            print(f"no record: {n}", file=sys.stderr)
+            continue
+        for ip in ips:
+            pve_lines.append(f"{ip} # {n} last request: {fr}")
+    data = "\n".join(pve_lines) + ("\n" if pve_lines else "")
+    path.write_text(data, encoding="utf-8")
+    return len(pve_lines)

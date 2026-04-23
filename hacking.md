@@ -36,6 +36,8 @@ If the unit fails (unknown `LogFilterPatterns=` on older systemd): install [10-d
 | Repository file | Install to |
 | --- | --- |
 | [lib/audit_export_common.py](lib/audit_export_common.py) | `/usr/local/lib/dns-proxmox-audit/audit_export_common.py` (mode `0644`) |
+| [lib/dns_audit_names_lib.py](lib/dns_audit_names_lib.py) | `/usr/local/lib/dns-proxmox-audit/dns_audit_names_lib.py` (mode `0644`) |
+| [lib/dns-merge-hourly-names.py](lib/dns-merge-hourly-names.py) | `/usr/local/lib/dns-proxmox-audit/dns-merge-hourly-names.py` (mode `0755`) |
 | [lib/dns-hourly-export.py](lib/dns-hourly-export.py) | `/usr/local/lib/dns-proxmox-audit/dns-hourly-export.py` (mode `0755`) |
 | [lib/static-endpoints-export.py](lib/static-endpoints-export.py) | `/usr/local/lib/dns-proxmox-audit/static-endpoints-export.py` (mode `0755`) |
 | [systemd/dns-hourly-export.service](systemd/dns-hourly-export.service) | `/etc/systemd/system/dns-hourly-export.service` |
@@ -44,15 +46,17 @@ If the unit fails (unknown `LogFilterPatterns=` on older systemd): install [10-d
 
 **Output directory (hourly files):** `/var/lib/dns-audit/`
 
-**Filename pattern:** e.g. `2026032914+0100-dns-names.txt`: wall-clock **start** of the hour, then `strftime("%z")` (no separator before the offset). Files produced before that change may use `2026032914_+0100-…`. Each file lists **one FQDN per line** (no IPs; used for names-seen-only audit).
+**Filename pattern:** e.g. `2026032914+0100-dns-names.txt`: wall-clock **start** of the hour, then `strftime("%z")` (no separator before the offset), as in [audit_export_common.filename_for_hour_start](lib/audit_export_common.py). Each file lists **one FQDN per line** (no IPs; used for names-seen-only audit).
 
-**Static lists (not hourly):** `apt-names.txt` and `ntp.txt` in the same directory — **HTTP(S) mirror hostnames** from `/etc/apt` and **NTP/chrony/timesyncd** peers. Regenerated when you run [ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) (static step on the target) or manually below. NTP from DHCP is not read; edge Deb822 or mirror URL formats may need manual checks.
+**Static lists (not hourly):** `apt-names.txt` and `ntp.txt` in the same directory — **HTTP(S) mirror hostnames** from `/etc/apt` and **NTP/chrony/timesyncd** peers (including `/etc/systemd/timesyncd.conf` and **`/etc/systemd/timesyncd.conf.d/*.conf`**). Regenerated when you run [ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) (static step on the target) or manually below. NTP from DHCP is not read; edge Deb822 or mirror URL formats may need manual checks.
 
 **Commands:**
 
 ```bash
 sudo install -d -m 0755 /usr/local/lib/dns-proxmox-audit
 sudo install -m 0644 lib/audit_export_common.py /usr/local/lib/dns-proxmox-audit/
+sudo install -m 0644 lib/dns_audit_names_lib.py /usr/local/lib/dns-proxmox-audit/
+sudo install -m 0755 lib/dns-merge-hourly-names.py /usr/local/lib/dns-proxmox-audit/
 sudo install -m 0755 lib/dns-hourly-export.py /usr/local/lib/dns-proxmox-audit/
 sudo install -m 0755 lib/static-endpoints-export.py /usr/local/lib/dns-proxmox-audit/
 sudo install -d -m 0755 /etc/tmpfiles.d
@@ -86,22 +90,26 @@ sudo /usr/local/lib/dns-proxmox-audit/static-endpoints-export.py
 
 ## Part 2b — Pull, merge, fetch
 
-[ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) runs the merge (and optional PVE line generation with **`getaddrinfo`**) on the **target**, then **`fetch`es** merged file(s) into the repo. Re-run [ansible/dns-audit.yml](ansible/dns-audit.yml) on the target so [lib/dns-resolve-and-stage-for-pve.py](lib/dns-resolve-and-stage-for-pve.py) is installed under `/usr/local/lib/dns-proxmox-audit/`.
+[ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) runs **`dns-merge-hourly-names.py`** on the **target**, then **`fetch`es** **`names-review.txt`** into the repo as **`.names-review.txt`**. Re-run [ansible/dns-audit.yml](ansible/dns-audit.yml) on the target after pulling new `lib/` files.
 
-**Manual** (e.g. copy `/var/lib/dns-audit` to a local dir, or merge on the target over SSH) with the same script:
+**Manual on the target** (merge hourly files under the audit dir):
 
 ```bash
-python3 lib/dns-resolve-and-stage-for-pve.py \
-  --input-dir ./pulled-audit \
-  --names-review ./names-review.txt \
-  --emit-pve --pve-staged ./pve-allowed-staged.txt
+sudo /usr/local/lib/dns-proxmox-audit/dns-merge-hourly-names.py
 ```
 
-Review `names-review.txt` (`name # last request: YYYYMMDDHH+0100`), then edit `pve-allowed-staged.txt` if needed (IP # name last request: …). For APT/NTP hostnames, use `apt-names.txt` / `ntp.txt` on the target under the audit dir (from static export) or re-run the static export. See [INSTALL.md](INSTALL.md) and `-e dns_target_host=…` with `-i …,`.
+**Manual on the controller** (after review; from repo root, defaults `.names-review.txt` → `.pve-allowed-staged.txt`):
+
+```bash
+python3 lib/dns-resolve-names-for-pve.py
+# or: python3 lib/dns-resolve-names-for-pve.py --ipv4-only
+```
+
+Review **`names-review.txt`** (`name # last request: YYYYMMDDHH+0100`), then run the resolver (or [ansible/proxmox-update-allowed-ips.yml](ansible/proxmox-update-allowed-ips.yml) **`--tags resolve`**). Edit **`.pve-allowed-staged.txt`** if needed (IP # name last request: …). For APT/NTP hostnames, use `apt-names.txt` / `ntp.txt` on the target under the audit dir (from static export) or re-run the static export. See [INSTALL.md](INSTALL.md) and `-e dns_target_host=…` with `-i …,`.
 
 ## Part 3 — Proxmox guest firewall (run on a Proxmox node)
 
-Install the helper with [ansible/proxmox-update-allowed-ips.yml](ansible/proxmox-update-allowed-ips.yml) `--tags install`, or copy the script as below. **Apply** a reviewed staged file with `--tags deploy` and `-e dns_audit_pve_staged_file=...` (see [INSTALL.md](INSTALL.md)); that run also does `systemctl reload pve-firewall` (errors ignored if the unit does not support reload).
+Install the helper with [ansible/proxmox-update-allowed-ips.yml](ansible/proxmox-update-allowed-ips.yml) `--tags install`, or copy the script as below. **Resolve** then **deploy**: `--tags resolve,deploy` (defaults use **`.pve-allowed-staged.txt`** in the repo; override with `-e dns_audit_pve_staged_file=...`). That run also does `systemctl reload pve-firewall` (errors ignored if the unit does not support reload).
 
 | Repository file | Install to (example) |
 | --- | --- |
@@ -128,6 +136,7 @@ cat approved-lines.txt | sudo /usr/local/lib/dns-proxmox-audit/proxmox-update-al
 
 - `/etc/systemd/system/systemd-resolved.service.d/10-dns-audit.conf`
 - `/etc/systemd/journald.conf.d/90-dns-audit-limits.conf`
+- `/usr/local/lib/dns-proxmox-audit/dns-merge-hourly-names.py`
 - `/usr/local/lib/dns-proxmox-audit/dns-hourly-export.py`
 - `/usr/local/lib/dns-proxmox-audit/static-endpoints-export.py`
 - `/usr/local/lib/dns-proxmox-audit/proxmox-update-allowed-ips.py`

@@ -142,6 +142,10 @@ def _parse_chrony_or_ntp(path: Path) -> set[str]:
 def collect_ntp_peers() -> set[str]:
     out: set[str] = set()
     out |= _parse_timesyncd(Path("/etc/systemd/timesyncd.conf"))
+    tsd = Path("/etc/systemd/timesyncd.conf.d")
+    if tsd.is_dir():
+        for p in sorted(tsd.glob("*.conf")):
+            out |= _parse_timesyncd(p)
     for p in (Path("/etc/chrony/chrony.conf"), Path("/etc/chrony.conf")):
         out |= _parse_chrony_or_ntp(p)
     out |= _parse_chrony_or_ntp(Path("/etc/ntp.conf"))

@@ -68,10 +68,17 @@
         mode: "0755"
       tags: [export]
 
-    - name: Install dns-resolve-and-stage-for-pve.py
+    - name: Install dns_audit_names_lib.py
       ansible.builtin.copy:
-        src: "{{ dns_audit_root }}/lib/dns-resolve-and-stage-for-pve.py"
-        dest: /usr/local/lib/dns-proxmox-audit/dns-resolve-and-stage-for-pve.py
+        src: "{{ dns_audit_root }}/lib/dns_audit_names_lib.py"
+        dest: /usr/local/lib/dns-proxmox-audit/dns_audit_names_lib.py
+        mode: "0644"
+      tags: [export]
+
+    - name: Install dns-merge-hourly-names.py
+      ansible.builtin.copy:
+        src: "{{ dns_audit_root }}/lib/dns-merge-hourly-names.py"
+        dest: /usr/local/lib/dns-proxmox-audit/dns-merge-hourly-names.py
         mode: "0755"
       tags: [export]
 

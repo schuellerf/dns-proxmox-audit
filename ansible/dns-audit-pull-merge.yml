@@ -1,26 +1,24 @@
 ---
-# On the target: static APT/NTP export, merge hourly DNS names (optional resolve for PVE); on the controller: fetch only the merged file(s) into the repo.
-# -e dns_target_host=… or -e dns_journal_host=…
-# -e dns_merge_emit_pve=false — names file only, no getaddrinfo / PVE line file
-# -e dns_merge_python=…
-# Install on the target: ansible/dns-audit.yml (provides /usr/local/lib/…/dns-resolve-and-stage-for-pve.py). PVE IP resolution uses the target's DNS.
-# -e dns_audit_names_review=  -e dns_audit_pve_staged=  local paths for fetch (defaults: repo `/.names-review.txt`, `/.pve-allowed-staged.txt`)
+# Target: static APT/NTP export, merge hourly DNS names → names-review.txt; controller: fetch for manual review.
+# Step 3 (resolve + deploy): ansible/proxmox-update-allowed-ips.yml --tags resolve,deploy
+# -e dns_target_host=…
+# -e dns_audit_fetch_src=…  audit directory on target (default /var/lib/dns-audit)
+# -e dns_audit_names_review=…  local path for fetch (default repo /.names-review.txt)
 # -e ansible_ssh_private_key_file=…  -e dns_audit_ssh_common_args=…
 - name: Pull dns names and merge
-  hosts: "{% if dns_target_host is defined and dns_target_host | string | length > 0 %}{{ dns_target_host }}{% elif dns_journal_host is defined and dns_journal_host | string | length > 0 %}{{ dns_journal_host }}{% else %}__set_dns_target_host__{% endif %}"
+  hosts: "{{ dns_target_host | default('localhost') }}"
   gather_facts: false
   vars:
     dns_audit_root: "{{ playbook_dir | dirname }}"
-    dns_merge_python: /usr/bin/python3
     ansible_ssh_common_args: "{{ dns_audit_ssh_common_args | default('-o BatchMode=yes -o StrictHostKeyChecking=accept-new', true) }}"
 
   tasks:
     - name: Assert target host is set
       ansible.builtin.assert:
         that:
-          - (dns_target_host is defined and dns_target_host | string | length > 0)
-            or (dns_journal_host is defined and dns_journal_host | string | length > 0)
-        fail_msg: "Set -e dns_target_host=TARGET_SSH (or deprecated dns_journal_host) to the audit host; it must be your SSH name for that system."
+          - dns_target_host is defined
+          - dns_target_host | string | length > 0
+        fail_msg: "Set -e dns_target_host=TARGET_SSH to the audit host (your SSH name for that system)."
       become: false
 
     - name: Refresh static APT and NTP host lists on target host
@@ -33,26 +31,17 @@
       become_flags: -n
       changed_when: true
 
-    - name: Merge hourly names on target (and optionally resolve to PVE staged)
+    - name: Merge hourly DNS names on target into names-review.txt
       ansible.builtin.command:
-        argv: "{{ _merge_argv }}"
+        argv:
+          - /usr/local/lib/dns-proxmox-audit/dns-merge-hourly-names.py
+          - --output-dir
+          - "{{ _dns_a_dir }}"
       become: true
       become_flags: -n
       changed_when: true
       vars:
         _dns_a_dir: "{{ (dns_audit_fetch_src | default('/var/lib/dns-audit', true)) | regex_replace('/+$', '') }}"
-        _t_names: "{{ _dns_a_dir }}/names-review.txt"
-        _t_pve: "{{ _dns_a_dir }}/pve-allowed-staged.txt"
-        _merge_base:
-          - "{{ dns_merge_python }}"
-          - /usr/local/lib/dns-proxmox-audit/dns-resolve-and-stage-for-pve.py
-          - --input-dir
-          - "{{ _dns_a_dir }}"
-          - --names-review
-          - "{{ _t_names }}"
-        _merge_with_pve: "{{ _merge_base + ['--emit-pve', '--pve-staged', _t_pve] + (['--ipv4-only'] if (dns_merge_ipv4_only | default(false) | bool) else []) }}"
-        _names_only: "{{ _merge_base }}"
-        _merge_argv: "{{ _merge_with_pve if (dns_merge_emit_pve | default(true) | bool) else _names_only }}"
 
     - name: Fetch names review to controller
       ansible.builtin.fetch:
@@ -63,14 +52,3 @@
       vars:
         _dns_a_dir: "{{ (dns_audit_fetch_src | default('/var/lib/dns-audit', true)) | regex_replace('/+$', '') }}"
         _t_names: "{{ _dns_a_dir }}/names-review.txt"
-
-    - name: Fetch PVE staged file to controller
-      ansible.builtin.fetch:
-        src: "{{ _t_pve }}"
-        dest: "{{ dns_audit_pve_staged | default(dns_audit_root + '/.pve-allowed-staged.txt', true) }}"
-        flat: true
-      when: dns_merge_emit_pve | default(true) | bool
-      become: false
-      vars:
-        _dns_a_dir: "{{ (dns_audit_fetch_src | default('/var/lib/dns-audit', true)) | regex_replace('/+$', '') }}"
-        _t_pve: "{{ _dns_a_dir }}/pve-allowed-staged.txt"

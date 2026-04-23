@@ -4,11 +4,11 @@ This project intends to learn which DNS names a machine actually queries over ti
 
 **Developed and tested on Ubuntu** (Debian family with `systemd-resolved` and the apt layout and paths assumed here; other distros are untested and may need adaptation.)
 
-**Three stages (conceptual):**
+**Three steps:**
 
 1. **Target host (audit):** Log DNS activity and write **names-only** hourly files (FQDNs you observed—no “trust the answer IP from the log” on this machine).
-2. **Controller (merge and fetch):** Run the pull-merge playbook: merge on the **audit host**, **`fetch`** merged lists into the repo; review (with **`--emit-pve`**, names resolve on the **target**).
-3. **Proxmox (deploy):** Copy the reviewed staged file to the node, run the merge script into the guest firewall file, **reload the firewall** so the updated **outgoing-destination allowlist** (and related rules) takes effect.
+2. **Pull / merge / fetch:** On the audit host, merge hourly files into **`names-review.txt`** and **`fetch`** **`.names-review.txt`** into the repo. **Edit that file** after review.
+3. **Resolve and Proxmox:** On the **controller**, run **`getaddrinfo`** to build **`.pve-allowed-staged.txt`**, then copy it to the node and merge into the guest firewall (**`resolve`** + **`deploy`** tags).
 
 ## Ansible quick start (three playbooks)
 
@@ -20,30 +20,30 @@ export PVE_HOST=your-pve.node.example.com           # Proxmox node for the firew
 cd /path/to/dns-proxmox-audit
 ```
 
-**1. Target host** — install audit tooling, resolved/journald drop-ins, hourly DNS export, static APT/NTP helper:
+**1. Target host** — install audit tooling, resolved/journald drop-ins, hourly DNS export, static APT/NTP helper, merge script:
 
 ```bash
 ansible-playbook -i "$TARGET_HOST," -b -K ansible/dns-audit.yml
 ```
 
-**2. Controller** — `-e dns_target_host=…`: on the target, static export + merge (and optional PVE resolve), then `fetch` merged file(s) into the repo:
+**2. Pull and merge** — on the target: static export + merge hourly names; **fetch** **`.names-review.txt`** into the repo (review and edit it before step 3):
 
 ```bash
 ansible-playbook -i "$TARGET_HOST," -b -K ansible/dns-audit-pull-merge.yml -e dns_target_host="$TARGET_HOST"
 ```
-(`-b -K` if the target user needs a sudo password; merge uses the **target** resolver when emitting PVE lines.)
 
-**3. Proxmox** — install the firewall helper, then (after review) deploy the staged file from this repo on the controller:
+**3. Proxmox** — install the firewall helper once; then **resolve** (controller DNS) and **deploy** to the node:
 
 ```bash
 ansible-playbook -i "$PVE_HOST," -b -K ansible/proxmox-update-allowed-ips.yml --tags install
 
-ansible-playbook -i "$PVE_HOST," -b -K ansible/proxmox-update-allowed-ips.yml --tags deploy \
-  -e dns_audit_pve_staged_file="$PWD/.pve-allowed-staged.txt" \
+ansible-playbook -i "$PVE_HOST," -b -K ansible/proxmox-update-allowed-ips.yml --tags resolve,deploy \
   -e pve_vm_fw=/etc/pve/firewall/100.fw
 ```
 
-More options (e.g. `dns_merge_emit_pve`, file layout): [INSTALL.md](INSTALL.md). Manual copy/install steps: [hacking.md](hacking.md).
+Default paths under the repo are **`.names-review.txt`** and **`.pve-allowed-staged.txt`**. Use **`-e dns_resolve_ipv4_only=true`** on the resolve/deploy playbook if you want IPv4 only. Override paths with **`-e dns_audit_names_review=…`**, **`-e dns_audit_pve_staged=…`** (resolve step) or **`-e dns_audit_pve_staged_file=…`** (deploy copy source).
+
+More detail: [INSTALL.md](INSTALL.md). Manual steps: [hacking.md](hacking.md).
 
 ## Outgoing access for the allowlists (hint)
 
