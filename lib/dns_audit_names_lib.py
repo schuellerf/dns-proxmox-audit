@@ -132,3 +132,44 @@ def write_pve_staged(path: Path, last: dict[str, datetime], ipv4_only: bool) -> 
     data = "\n".join(pve_lines) + ("\n" if pve_lines else "")
     path.write_text(data, encoding="utf-8")
     return len(pve_lines)
+
+
+def load_plain_hostnames(path: Path) -> list[str]:
+    """One FQDN per line (comments and empty lines ignored)."""
+    names: list[str] = []
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        print(f"read {path}: {e}", file=sys.stderr)
+        return names
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "#" in line:
+            line = line.split("#", 1)[0].strip()
+        n = line.lower().rstrip(".")
+        if not n or "." not in n:
+            continue
+        names.append(n)
+    return names
+
+
+def write_pve_staged_plain_names(
+    path: Path, hostnames: list[str], ipv4_only: bool
+) -> int:
+    """Resolve plain hostname list to IP lines (ip # hostname)."""
+    pve_lines: list[str] = []
+    for n in sorted(set(hostnames)):
+        ips, err = resolve_name(n, ipv4_only)
+        if err:
+            print(f"resolve fail {n}: {err}", file=sys.stderr)
+            continue
+        if not ips:
+            print(f"no record: {n}", file=sys.stderr)
+            continue
+        for ip in ips:
+            pve_lines.append(f"{ip} # {n}")
+    data = "\n".join(pve_lines) + ("\n" if pve_lines else "")
+    path.write_text(data, encoding="utf-8")
+    return len(pve_lines)

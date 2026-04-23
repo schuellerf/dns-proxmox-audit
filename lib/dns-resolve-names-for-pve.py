@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolve names in names-review.txt to IPs and write pve-allowed-staged.txt (controller)."""
+"""Resolve hostname lists to IPs and write staged files for proxmox-update-allowed-ips.py (controller)."""
 
 from __future__ import annotations
 
@@ -11,11 +11,28 @@ _LIB = Path(__file__).resolve().parent
 if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
 
-from dns_audit_names_lib import load_names_review, write_pve_staged  # noqa: E402
+from dns_audit_names_lib import (  # noqa: E402
+    load_names_review,
+    load_plain_hostnames,
+    write_pve_staged,
+    write_pve_staged_plain_names,
+)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "--apt-names",
+        type=Path,
+        default=Path("apt-names.txt"),
+        help="Input: one FQDN per line (APT mirrors, etc.)",
+    )
+    ap.add_argument(
+        "--ntp-names",
+        type=Path,
+        default=Path("ntp.txt"),
+        help="Input: one FQDN per line (NTP servers)",
+    )
     ap.add_argument(
         "--names-review",
         type=Path,
@@ -23,10 +40,22 @@ def main() -> int:
         help="Input: merged FQDN list with last-request timestamps",
     )
     ap.add_argument(
+        "--apt-staged",
+        type=Path,
+        default=Path(".pve-apt-names-staged.txt"),
+        help="Output: IP lines for [IPSET apt-names]",
+    )
+    ap.add_argument(
+        "--ntp-staged",
+        type=Path,
+        default=Path(".pve-ntp-names-staged.txt"),
+        help="Output: IP lines for [IPSET ntp-names]",
+    )
+    ap.add_argument(
         "--pve-staged",
         type=Path,
         default=Path(".pve-allowed-staged.txt"),
-        help="Output: IP lines for proxmox-update-allowed-ips.py",
+        help="Output: IP lines for [IPSET reviewed-names]",
     )
     ap.add_argument(
         "--ipv4-only",
@@ -34,15 +63,44 @@ def main() -> int:
         help="Only IPv4 addresses from getaddrinfo",
     )
     args = ap.parse_args()
-    nr = args.names_review
-    if not nr.is_file():
-        print(f"not a file: {nr}", file=sys.stderr)
-        return 1
-    last = load_names_review(nr)
-    if not last:
-        print(f"warning: no names in {nr}", file=sys.stderr)
-    n_lines = write_pve_staged(args.pve_staged, last, args.ipv4_only)
-    print(f"Wrote {args.pve_staged} ({n_lines} IP lines)")
+
+    ipv4 = args.ipv4_only
+
+    if args.apt_names.is_file():
+        hosts = load_plain_hostnames(args.apt_names)
+        n_apt = write_pve_staged_plain_names(args.apt_staged, hosts, ipv4)
+        print(f"Wrote {args.apt_staged} ({n_apt} IP lines) from {args.apt_names}")
+    else:
+        args.apt_staged.write_text("", encoding="utf-8")
+        print(
+            f"skip apt: not a file {args.apt_names}; wrote empty {args.apt_staged}",
+            file=sys.stderr,
+        )
+
+    if args.ntp_names.is_file():
+        hosts = load_plain_hostnames(args.ntp_names)
+        n_ntp = write_pve_staged_plain_names(args.ntp_staged, hosts, ipv4)
+        print(f"Wrote {args.ntp_staged} ({n_ntp} IP lines) from {args.ntp_names}")
+    else:
+        args.ntp_staged.write_text("", encoding="utf-8")
+        print(
+            f"skip ntp: not a file {args.ntp_names}; wrote empty {args.ntp_staged}",
+            file=sys.stderr,
+        )
+
+    if args.names_review.is_file():
+        last = load_names_review(args.names_review)
+        if not last:
+            print(f"warning: no names in {args.names_review}", file=sys.stderr)
+        n_rev = write_pve_staged(args.pve_staged, last, ipv4)
+        print(f"Wrote {args.pve_staged} ({n_rev} IP lines) from {args.names_review}")
+    else:
+        args.pve_staged.write_text("", encoding="utf-8")
+        print(
+            f"skip reviewed: not a file {args.names_review}; wrote empty {args.pve_staged}",
+            file=sys.stderr,
+        )
+
     return 0
 
 

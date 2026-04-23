@@ -98,39 +98,48 @@ sudo /usr/local/lib/dns-proxmox-audit/static-endpoints-export.py
 sudo /usr/local/lib/dns-proxmox-audit/dns-merge-hourly-names.py
 ```
 
-**Manual on the controller** (after review; from repo root, defaults `names-review.txt` → `.pve-allowed-staged.txt`):
+**Manual on the controller** (after review; from repo root — resolves **`apt-names.txt`**, **`ntp.txt`**, **`names-review.txt`** into **`.pve-apt-names-staged.txt`**, **`.pve-ntp-names-staged.txt`**, **`.pve-allowed-staged.txt`**; a missing input file produces an empty staged file for that channel):
 
 ```bash
 python3 lib/dns-resolve-names-for-pve.py
 # or: python3 lib/dns-resolve-names-for-pve.py --ipv4-only
 ```
 
-Review **`names-review.txt`** (`name # last request: YYYYMMDDHH+0100`), then run the resolver (or [ansible/proxmox-update-allowed-ips.yml](ansible/proxmox-update-allowed-ips.yml) **`--tags resolve`**). Edit **`.pve-allowed-staged.txt`** if needed (IP # name last request: …). For APT/NTP hostnames, use `apt-names.txt` / `ntp.txt` on the target under the audit dir (from static export) or re-run the static export. See [INSTALL.md](INSTALL.md) and `-e dns_target_host=…` with `-i …,`.
+Review **`names-review.txt`** (`name # last request: YYYYMMDDHH+0100`), then run the resolver (or [ansible/proxmox-update-allowed-ips.yml](ansible/proxmox-update-allowed-ips.yml) **`--tags resolve`**). Edit the staged files if needed. For APT/NTP hostnames, use **`apt-names.txt`** / **`ntp.txt`** from the target (static export) or re-run the static export. The merge step updates **only** **`[IPSET apt-names]`**, **`[IPSET ntp-names]`**, and **`[IPSET reviewed-names]`** in the guest **`.fw`**; add **`+guest/apt-names`**, **`+guest/ntp-names`**, **`+guest/reviewed-names`** in **`[RULES]`** yourself if you want those sets enforced. See [INSTALL.md](INSTALL.md) and `-e dns_target_host=…` with `-i …,`.
 
 ## Part 3 — Proxmox guest firewall (run on a Proxmox node)
 
-Copy the script to the node as in the table below if you want to pipe into it on the node. The playbook’s flow is **`--tags resolve`** (fetch guest **`.fw`**, resolve names, merge on the **controller** into **`.pve-fw-merged.<vmid>.fw`**) then **`--tags deploy`** (upload that file, `pve-firewall compile`, `systemctl reload pve-firewall`). Override merged output with **`-e dns_audit_pve_merged_fw=...`**. Reload after **deploy** ignores failure if the unit does not support reload.
+Copy the script to the node as in the table below if you want to run it on the node. The playbook’s flow is **`--tags resolve`** (fetch guest **`.fw`**, resolve **`apt-names.txt` / `ntp.txt` / `names-review.txt`** on the **controller**, merge **only** the three managed IPSET bodies into **`.pve-fw-merged.<vmid>.fw`**) then **`--tags deploy`** (upload that file, `pve-firewall compile`, `systemctl reload pve-firewall`). **`[RULES]`** and all other **`[IPSET …]`** blocks are copied unchanged from the fetched file. Override merged output with **`-e dns_audit_pve_merged_fw=...`**. Reload after **deploy** ignores failure if the unit does not support reload.
 
 | Repository file | Install to (example) |
 | --- | --- |
 | [lib/proxmox-update-allowed-ips.py](lib/proxmox-update-allowed-ips.py) | `/usr/local/lib/dns-proxmox-audit/proxmox-update-allowed-ips.py` (mode `0755`) |
 | Guest rules | `/etc/pve/firewall/<VMID>.fw` (pass to `--firewall`) |
 
-**Dry run:**
+**Dry run (managed IPSETs — same model as the Ansible resolve step):**
+
+```bash
+python3 lib/proxmox-update-allowed-ips.py --firewall /path/to/.pve-fw.fetched.100.fw --dry-run \
+  --managed-ipset apt-names:.pve-apt-names-staged.txt \
+  --managed-ipset ntp-names:.pve-ntp-names-staged.txt \
+  --managed-ipset reviewed-names:.pve-allowed-staged.txt
+```
+
+**Dry run / apply (legacy: single `[IPSET <name>]`, default `allowed-ips`):**
 
 ```bash
 cat approved-lines.txt | sudo /usr/local/lib/dns-proxmox-audit/proxmox-update-allowed-ips.py \
   --firewall /etc/pve/firewall/100.fw --dry-run
 ```
 
-**Apply (adds new IPs, keeps existing; optional `--sort`):**
+**Apply legacy merge (adds new IPs, keeps existing; optional `--sort`):**
 
 ```bash
 cat approved-lines.txt | sudo /usr/local/lib/dns-proxmox-audit/proxmox-update-allowed-ips.py \
-  --firewall /etc/pve/firewall/100.fw --input - 
+  --firewall /etc/pve/firewall/100.fw --input -
 ```
 
-(Use a real file path; `pve-firewall compile` is run automatically unless `--no-compile`.)
+(`pve-firewall compile` runs automatically unless `--no-compile`.)
 
 ## Copy-paste: paths on the host
 

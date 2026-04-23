@@ -1,10 +1,10 @@
-# DNS audit + Proxmox `allowed-ips` — install
+# DNS audit + Proxmox guest firewall — install
 
 **Overview and the three `ansible-playbook` entrypoints** are in [README.md](README.md) (target install, pull/merge, resolve + Proxmox deploy).
 
 **Tested on Ubuntu;** for outgoing TCP/UDP ports to allow toward mirrors, NTP, and DNS, see the **Outgoing access** section in [README.md](README.md).
 
-**Trust model:** the **target host** only writes **FQDNs** per hour (`*dns-names.txt` from the systemd-resolved **journal**). IPs for the firewall are **never** taken from journal answers. The pull/merge playbook **merges** hourly names on the target into **`names-review.txt`**, refreshes **`apt-names.txt`** and **`ntp.txt`**, and **`fetch`es** all three into your repo (defaults: **`names-review.txt`**, **`apt-names.txt`**, **`ntp.txt`** under the repo root, each with **`become`** on the target so **`/var/lib/dns-audit`** can stay `0750` root-only). After you **review** that file, the Proxmox playbook’s **`resolve`** step **fetches** the current guest **`.fw`** from the node, runs **`getaddrinfo` on the controller** into **`.pve-allowed-staged.txt`**, and **merges locally** into **`.pve-fw-merged.<vmid>.fw`**; **`deploy`** copies that merged file to the node, runs **`pve-firewall compile`**, and reloads.
+**Trust model:** the **target host** only writes **FQDNs** per hour (`*dns-names.txt` from the systemd-resolved **journal**). IPs for the firewall are **never** taken from journal answers. The pull/merge playbook **merges** hourly names on the target into **`names-review.txt`**, refreshes **`apt-names.txt`** and **`ntp.txt`**, and **`fetch`es** all three into your repo (defaults under the repo root, each with **`become`** on the target so **`/var/lib/dns-audit`** can stay `0750` root-only). After you **review** **`names-review.txt`**, the Proxmox playbook’s **`resolve`** step **fetches** the current guest **`.fw`** from the node, resolves those three lists on the controller into staged IP files, and **merges locally** into **`.pve-fw-merged.<vmid>.fw`**, updating **only** the **`[IPSET apt-names]`**, **`[IPSET ntp-names]`**, and **`[IPSET reviewed-names]`** sections. All other **`[IPSET …]`** blocks and **`[RULES]`** are left as on the node; you reference **`+guest/apt-names`** and the other sets in rules if you want. **`deploy`** copies the merged file to the node, runs **`pve-firewall compile`**, and reloads.
 
 **Prerequisites:** `ansible-playbook`, SSH to the target host and (separately) to the PVE node.
 
@@ -42,10 +42,10 @@ Use **`-i your.pve.node.example.com,`** and **`-e pve_vmid=<guest id>`** (or **`
 
 | Step | Tag |
 | --- | --- |
-| **Slurp** guest **`.fw`** from **`/etc/pve/firewall/<vmid>.fw`**, write **`.pve-fw.fetched.<vmid>.fw`** on the controller; then **`names-review.txt`** → **`.pve-allowed-staged.txt`**; then local **`proxmox-update-allowed-ips.py --dry-run`** → **`.pve-fw-merged.<vmid>.fw`** | `resolve` |
+| **Slurp** guest **`.fw`**; **`apt-names.txt`**, **`ntp.txt`**, **`names-review.txt`** → staged IP files; local **`proxmox-update-allowed-ips.py --dry-run --managed-ipset …`** (three sets) → **`.pve-fw-merged.<vmid>.fw`** | `resolve` |
 | Copy merged **`.fw`** to the node, **`pve-firewall compile`**, **`systemctl reload pve-firewall`** | `deploy` |
 
-Typical: **`--tags resolve`** then **`--tags deploy`** after editing **`names-review.txt`**. Defaults: **`dns_audit_names_review`** and **`dns_audit_pve_staged`** (resolve) point to **`$REPO/names-review.txt`** and **`$REPO/.pve-allowed-staged.txt`**; **`dns_audit_pve_merged_fw`** (deploy source) defaults to **`$REPO/.pve-fw-merged.<vmid>.fw`**.
+Typical: **`--tags resolve`** then **`--tags deploy`** after editing **`names-review.txt`**. Defaults: **`dns_audit_apt_names`**, **`dns_audit_ntp_names`**, **`dns_audit_names_review`**, **`dns_audit_pve_staged_apt`**, **`dns_audit_pve_staged_ntp`**, **`dns_audit_pve_staged_reviewed`** under **`$REPO/`**; **`dns_audit_pve_merged_fw`** (deploy source) defaults to **`$REPO/.pve-fw-merged.<vmid>.fw`**.
 
 **`-e dns_resolve_ipv4_only=true`** — pass **`--ipv4-only`** to the resolver on the controller.
 

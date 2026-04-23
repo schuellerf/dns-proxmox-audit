@@ -8,8 +8,8 @@
 # -e pve_vm_fw=… — full path to guest .fw on the node (overrides pve_vmid path)
 # -e dns_resolve_ipv4_only=true — IPv4 only for getaddrinfo
 # -e dns_audit_pve_merged_fw=… — local merged .fw for deploy (default .pve-fw-merged.<vmid>.fw under repo)
-# -e dns_audit_names_review=… -e dns_audit_pve_staged=… — resolve inputs (default names-review.txt, .pve-allowed-staged.txt)
-# Staged file format: IP # name last request: … (from dns-resolve-names-for-pve.py)
+# Managed IPSET bodies only: apt-names, ntp-names, reviewed-names (from apt-names.txt, ntp.txt, names-review.txt).
+# [RULES] and all other [IPSET …] blocks are copied unchanged from the fetched .fw; wire +guest/apt-names etc. in Proxmox yourself.
 - name: Fetch guest .fw from PVE to repo (for local merge)
   hosts: all
   become: true
@@ -26,7 +26,8 @@
         src: "{{ _pve_fw }}"
       register: _pve_fw_slurp
 
-    - name: Write fetched .fw on controller
+    - name: Write fetched .fw on localhost
+      become: false
       ansible.builtin.copy:
         content: "{{ _pve_fw_slurp['content'] | b64decode }}"
         dest: "{{ dns_audit_pve_fetched }}"
@@ -34,20 +35,25 @@
       delegate_to: localhost
       connection: local
 
-- name: Resolve names-review to staged file and merge with fetched .fw (localhost)
+- name: Resolve hostname lists to staged IP files and merge with fetched .fw (localhost)
   hosts: localhost
   connection: local
   gather_facts: false
+  become: false
   tags: [resolve]
   vars:
     dns_audit_root: "{{ playbook_dir | dirname }}"
+    dns_audit_apt_names: "{{ dns_audit_root }}/apt-names.txt"
+    dns_audit_ntp_names: "{{ dns_audit_root }}/ntp.txt"
     dns_audit_names_review: "{{ dns_audit_root }}/names-review.txt"
-    dns_audit_pve_staged: "{{ dns_audit_root }}/.pve-allowed-staged.txt"
+    dns_audit_pve_staged_apt: "{{ dns_audit_root }}/.pve-apt-names-staged.txt"
+    dns_audit_pve_staged_ntp: "{{ dns_audit_root }}/.pve-ntp-names-staged.txt"
+    dns_audit_pve_staged_reviewed: "{{ dns_audit_root }}/.pve-allowed-staged.txt"
     dns_audit_pve_fetched: "{{ dns_audit_root }}/.pve-fw.fetched.{{ pve_vmid | default(100) | string }}.fw"
     dns_audit_pve_merged_fw: "{{ dns_audit_root }}/.pve-fw-merged.{{ pve_vmid | default(100) | string }}.fw"
 
   tasks:
-    - name: Build .pve-allowed-staged.txt from reviewed names
+    - name: Build staged IP files (apt-names, ntp-names, reviewed-names)
       ansible.builtin.command:
         argv: "{{ _resolve_argv }}"
       args:
@@ -55,7 +61,7 @@
       changed_when: true
       vars:
         _py: "{{ ansible_python_interpreter | default('/usr/bin/python3') }}"
-        _resolve_argv: "{{ [_py, dns_audit_root + '/lib/dns-resolve-names-for-pve.py', '--names-review', dns_audit_names_review, '--pve-staged', dns_audit_pve_staged] + (['--ipv4-only'] if (dns_resolve_ipv4_only | default(false) | bool) else []) }}"
+        _resolve_argv: "{{ [_py, dns_audit_root + '/lib/dns-resolve-names-for-pve.py', '--apt-names', dns_audit_apt_names, '--ntp-names', dns_audit_ntp_names, '--names-review', dns_audit_names_review, '--apt-staged', dns_audit_pve_staged_apt, '--ntp-staged', dns_audit_pve_staged_ntp, '--pve-staged', dns_audit_pve_staged_reviewed] + (['--ipv4-only'] if (dns_resolve_ipv4_only | default(false) | bool) else []) }}"
 
     - name: Local merge (dry-run) into .pve-fw-merged file
       ansible.builtin.command:
@@ -66,7 +72,7 @@
         chdir: "{{ dns_audit_root }}"
       vars:
         _py: "{{ ansible_python_interpreter | default('/usr/bin/python3') }}"
-        _merge_dryrun_argv: "{{ [_py, dns_audit_root + '/lib/proxmox-update-allowed-ips.py', '--firewall', dns_audit_pve_fetched, '--input', dns_audit_pve_staged, '--dry-run'] }}"
+        _merge_dryrun_argv: "{{ [_py, dns_audit_root + '/lib/proxmox-update-allowed-ips.py', '--firewall', dns_audit_pve_fetched, '--dry-run', '--managed-ipset', ('apt-names:' + dns_audit_pve_staged_apt), '--managed-ipset', ('ntp-names:' + dns_audit_pve_staged_ntp), '--managed-ipset', ('reviewed-names:' + dns_audit_pve_staged_reviewed)] }}"
 
     - name: Write merged .fw for review and deploy
       ansible.builtin.copy:
