@@ -151,6 +151,63 @@ def _merge_block(
     return meta + out
 
 
+def _rules_body_references_ipset(body: list[str], short: str) -> bool:
+    token = f"+guest/{short}"
+    for ln in body:
+        s = ln.strip()
+        if not s or s.startswith("#"):
+            continue
+        if token in s:
+            return True
+    return False
+
+
+def _managed_ipset_rule_suggestion_lines(short: str) -> list[str]:
+    if short == "dns-ips":
+        return [
+            "# OUT ACCEPT -dest +guest/dns-ips -p udp -dport 53 -log nolog",
+            "# OUT ACCEPT -dest +guest/dns-ips -p tcp -dport 53 -log nolog",
+        ]
+    return [f"# OUT ACCEPT -dest +guest/{short} -log nolog"]
+
+
+def _append_missing_managed_ipset_rule_suggestions(
+    sections: list[tuple[str, str | None, list[str]]],
+) -> list[tuple[str, str | None, list[str]]]:
+    """Append commented OUT ACCEPT suggestions for +guest/… sets absent from [RULES]."""
+    ri = next((i for i, (c, _, _) in enumerate(sections) if c == "[RULES]"), -1)
+    if ri < 0:
+        rules_body: list[str] = []
+    else:
+        _c, _h, rules_body = sections[ri]
+
+    missing = [
+        n
+        for n in _MANAGED_IPSET_ORDER
+        if not _rules_body_references_ipset(rules_body, n)
+    ]
+    if not missing:
+        return sections
+
+    extra: list[str] = []
+    for n in missing:
+        extra.extend(_managed_ipset_rule_suggestion_lines(n))
+
+    if ri < 0:
+        out = list(sections)
+        out.append(("[RULES]", "[RULES]", extra))
+        return out
+
+    out = list(sections)
+    canon, hdr, body = out[ri]
+    new_body = list(body)
+    if new_body and new_body[-1].strip():
+        new_body.append("")
+    new_body.extend(extra)
+    out[ri] = (canon, hdr, new_body)
+    return out
+
+
 def merge_firewall_managed_ipsets(
     fw_text: str,
     staged_by_name: dict[str, str],
@@ -189,6 +246,7 @@ def merge_firewall_managed_ipsets(
     else:
         out.extend(new_blocks)
 
+    out = _append_missing_managed_ipset_rule_suggestions(out)
     return _serialize_sections(out)
 
 
