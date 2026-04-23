@@ -34,7 +34,9 @@ ansible-playbook -i "$TARGET_HOST," -b -K ansible/dns-audit-pull-merge.yml -e dn
 
 **3. Proxmox** — **resolve** (fetch **`.fw`**, DNS staging, local merge) and **deploy** (upload merged **`.fw`** only):
 
-Before running this step, review **`names-review.txt`**, **`apt-names.txt`**, **`ntp.txt`**, and (if you use the set in rules) **`dns-ips.txt`**
+Before running **resolve** step, review **`names-review.txt`**, **`apt-names.txt`**, **`ntp.txt`**, and (if you use the set in rules) **`dns-ips.txt`**
+
+Before running **deploy** step, review the merged **`.pve-fw-merged.NNN.fw`** and make sure the **`[RULES]`** section is correct.
 
 ```bash
 ansible-playbook -i "$PVE_HOST," -b -K ansible/proxmox-update-allowed-ips.yml --tags resolve \
