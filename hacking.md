@@ -61,7 +61,13 @@ sudo systemctl enable --now dns-hourly-export.timer
 **Manual run (last completed local hour):**
 
 ```bash
-sudo /usr/local/lib/dns-proxmox-audit/dns-hourly-export.py --output-dir /var/lib/dns-audit
+sudo /usr/local/lib/dns-proxmox-audit/dns-hourly-export.py
+```
+
+**This clock hour so far (start of the hour through now),** e.g. to test before the hour rolls over:
+
+```bash
+sudo /usr/local/lib/dns-proxmox-audit/dns-hourly-export.py --through-now
 ```
 
 **Time zone for filenames:** the script uses `datetime.now().astimezone().tzinfo` when `--timezone local` (default). For a named zone: `--timezone Europe/Berlin`.

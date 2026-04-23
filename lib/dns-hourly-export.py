@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Export the previous local hour of systemd-resolved journal: FQDNs only (no IPs; trust merge on a controller)."""
+"""Export systemd-resolved journal lines for a time range: FQDNs only (no IPs; trust merge on a controller).
+
+By default, the range is the previous full local clock hour. Use --through-now for the current partial hour
+(start of this hour through now).
+"""
 
 from __future__ import annotations
 
@@ -123,6 +127,13 @@ def _previous_hour_range(tz: datetime.tzinfo) -> tuple[datetime, datetime]:
     return start, end
 
 
+def _current_hour_through_now_range(tz: datetime.tzinfo) -> tuple[datetime, datetime]:
+    """[start of current clock hour, now) — for ad-hoc runs that should include the ongoing hour."""
+    now = datetime.now(tz)
+    start = now.replace(minute=0, second=0, microsecond=0)
+    return start, now
+
+
 def _offset_in_filename(dt: datetime) -> str:
     off = dt.strftime("%z")
     return off if off else "+0000"
@@ -186,9 +197,14 @@ def main() -> None:
         help="Override end (ISO).",
     )
     ap.add_argument(
+        "--through-now",
+        action="store_true",
+        help="Use start of the current clock hour as --since and now as --until (not the previous full hour).",
+    )
+    ap.add_argument(
         "--timezone",
         default="local",
-        help="Zone for default previous hour (e.g. Europe/Berlin). 'local' = system local.",
+        help="Zone for default time ranges (e.g. Europe/Berlin). 'local' = system local.",
     )
     ap.add_argument(
         "-u",
@@ -212,11 +228,15 @@ def main() -> None:
         tz = tzi if tzi is not None else timezone.utc
     else:
         tz = ZoneInfo(args.timezone)
+    if args.through_now and (args.since or args.until):
+        ap.error("use --through-now without --since/--until")
     if args.since and args.until:
         start = _parse_dt(args.since, tz)
         end = _parse_dt(args.until, tz)
     elif args.since or args.until:
         ap.error("pass both --since and --until, or neither")
+    elif args.through_now:
+        start, end = _current_hour_through_now_range(tz)
     else:
         start, end = _previous_hour_range(tz)
     sub = tuple(_DEFAULT_LINE_SUBSTR)
