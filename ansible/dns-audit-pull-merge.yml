@@ -2,14 +2,18 @@
 # Run on the Ansible controller: refresh static lists on target, rsync audit dir, merge *dns-names.txt, optional resolve to IPs.
 # -e dns_target_host=TARGET_SSH  (or deprecated -e dns_journal_host=…)
 # -e dns_merge_emit_pve=false  # names list only, no getaddrinfo on this host
+# -e ansible_python_interpreter=/usr/bin/python3  # override if needed (avoids broken pyenv shims on the controller)
+# -e dns_merge_python=/usr/bin/python3            # interpreter for dns-resolve-and-stage-for-pve.py
 - name: Pull dns names and merge
   hosts: localhost
   connection: local
-  gather_facts: true
+  gather_facts: false
   vars:
     dns_audit_root: "{{ playbook_dir | dirname }}"
     dns_audit_local_pull: "{{ dns_audit_root }}/.pulled-audit"
     dns_audit_fetch_src: "{{ dns_audit_fetch_src | default('/var/lib/dns-audit') }}"
+    ansible_python_interpreter: /usr/bin/python3
+    dns_merge_python: /usr/bin/python3
 
   tasks:
     - name: Resolve audit target host (dns_target_host or legacy dns_journal_host)
@@ -57,7 +61,7 @@
     - name: Merge to names review only
       ansible.builtin.command:
         argv:
-          - python3
+          - "{{ dns_merge_python }}"
           - "{{ dns_audit_root }}/lib/dns-resolve-and-stage-for-pve.py"
           - --input-dir
           - "{{ dns_audit_local_pull }}"
@@ -71,7 +75,7 @@
         argv: "{{ _argv }}"
       vars:
         _base:
-          - python3
+          - "{{ dns_merge_python }}"
           - "{{ dns_audit_root }}/lib/dns-resolve-and-stage-for-pve.py"
           - --input-dir
           - "{{ dns_audit_local_pull }}"

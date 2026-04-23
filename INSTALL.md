@@ -31,6 +31,8 @@ Runs `static-endpoints-export.py` on the **target** over SSH (`sudo` required), 
 - `-e dns_merge_emit_pve=false` — names-only list, no `getaddrinfo` on the controller.
 - `-e dns_merge_ipv4_only=true` — only IPv4 when resolving.
 
+The playbook does **not** run Ansible fact gathering and pins **`ansible_python_interpreter`** and the merge step’s Python to **`/usr/bin/python3`** by default, so a broken **pyenv**/`PATH` on the controller does not break the run. Override with **`-e ansible_python_interpreter=...`** or **`-e dns_merge_python=...`** if your system Python lives elsewhere.
+
 ### 3. Proxmox — [ansible/proxmox-update-allowed-ips.yml](ansible/proxmox-update-allowed-ips.yml)
 
 | Step | Tag |
