@@ -95,7 +95,6 @@
       ansible.builtin.copy:
         src: "{{ dns_audit_pve_merged_fw }}"
         dest: "{{ _pve_fw }}"
-        mode: "0600"
 
     - name: pve-firewall compile
       ansible.builtin.command:
