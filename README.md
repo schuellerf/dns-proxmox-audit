@@ -8,7 +8,7 @@ This project intends to learn which DNS names a machine actually queries over ti
 
 1. **Target host (audit):** Log DNS activity and write **names-only** hourly files (FQDNs you observed—no “trust the answer IP from the log” on this machine).
 2. **Pull / merge / fetch:** On the audit host, merge hourly files into **`names-review.txt`**, refresh **`apt-names.txt`** / **`ntp.txt`**, and **`fetch`** all three into the repo root. **Edit `names-review.txt`** after review.
-3. **Resolve and Proxmox:** On the **controller**, run **`getaddrinfo`** to build **`.pve-allowed-staged.txt`**, then copy it to the node and merge into the guest firewall (**`resolve`** + **`deploy`** tags).
+3. **Resolve and Proxmox:** With **`-i "$PVE_HOST,"`**, **`resolve`** fetches the guest **`.fw`** from the node, runs **`getaddrinfo`** on the controller to build **`.pve-allowed-staged.txt`**, and writes a **merged** **`.pve-fw-merged.<vmid>.fw`** under the repo (see **`.gitignore`** for local-only paths). Review those files, then **`deploy`** uploads the merged **`.fw`**, runs **`pve-firewall compile`**, and reloads the firewall.
 
 ## Ansible quick start (three playbooks)
 
@@ -32,16 +32,21 @@ ansible-playbook -i "$TARGET_HOST," -b -K ansible/dns-audit.yml
 ansible-playbook -i "$TARGET_HOST," -b -K ansible/dns-audit-pull-merge.yml -e dns_target_host="$TARGET_HOST"
 ```
 
-**3. Proxmox** — install the firewall helper once; then **resolve** (controller DNS) and **deploy** to the node:
+**3. Proxmox** — **`install`** (optional, for manual on-node use in [hacking.md](hacking.md)); then **resolve** (fetch **`.fw`**, DNS staging, local merge) and **deploy** (upload merged **`.fw`** only):
 
 ```bash
-ansible-playbook -i "$PVE_HOST," -b -K ansible/proxmox-update-allowed-ips.yml --tags install
+ansible-playbook -i "$PVE_HOST," -b -K ansible/proxmox-update-allowed-ips.yml --tags install   # optional
 
-ansible-playbook -i "$PVE_HOST," -b -K ansible/proxmox-update-allowed-ips.yml --tags resolve,deploy \
-  -e pve_vm_fw=/etc/pve/firewall/100.fw
+ansible-playbook -i "$PVE_HOST," -b -K ansible/proxmox-update-allowed-ips.yml --tags resolve \
+  -e pve_vmid=100
+
+ansible-playbook -i "$PVE_HOST," -b -K ansible/proxmox-update-allowed-ips.yml --tags deploy \
+  -e pve_vmid=100
 ```
 
-Default paths under the repo are **`names-review.txt`** and **`.pve-allowed-staged.txt`**. Use **`-e dns_resolve_ipv4_only=true`** on the resolve/deploy playbook if you want IPv4 only. Override paths with **`-e dns_audit_names_review=…`**, **`-e dns_audit_pve_staged=…`** (resolve step) or **`-e dns_audit_pve_staged_file=…`** (deploy copy source). Fetch uses **`become`** so the controller can read **`/var/lib/dns-audit`** (mode `0750`).
+Guest firewall path on the node defaults to **`/etc/pve/firewall/<pve_vmid>.fw`** (default **`pve_vmid`**: 100). Override the path with **`-e pve_vm_fw=/path/to/guest.fw`** if needed.
+
+Default paths under the repo are **`names-review.txt`**, **`.pve-allowed-staged.txt`**, **`.pve-fw.fetched.<vmid>.fw`**, and **`.pve-fw-merged.<vmid>.fw`** (the last two plus the staged file are gitignored). Use **`-e dns_resolve_ipv4_only=true`** on **resolve** if you want IPv4 only. Override inputs with **`-e dns_audit_names_review=…`**, **`-e dns_audit_pve_staged=…`**, or **`-e dns_audit_pve_merged_fw=…`** (local merged **`.fw`** used by **deploy**). The guest **`.fw`** must already exist on the node before the first **resolve** (create/enable guest firewall in Proxmox if needed). Fetch in step 2 uses **`become`** so the controller can read **`/var/lib/dns-audit`** (mode `0750`).
 
 More detail: [INSTALL.md](INSTALL.md). Manual steps: [hacking.md](hacking.md).
 

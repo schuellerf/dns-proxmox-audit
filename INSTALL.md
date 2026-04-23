@@ -4,7 +4,7 @@
 
 **Tested on Ubuntu;** for outgoing TCP/UDP ports to allow toward mirrors, NTP, and DNS, see the **Outgoing access** section in [README.md](README.md).
 
-**Trust model:** the **target host** only writes **FQDNs** per hour (`*dns-names.txt` from the systemd-resolved **journal**). IPs for the firewall are **never** taken from journal answers. The pull/merge playbook **merges** hourly names on the target into **`names-review.txt`**, refreshes **`apt-names.txt`** and **`ntp.txt`**, and **`fetch`es** all three into your repo (defaults: **`names-review.txt`**, **`apt-names.txt`**, **`ntp.txt`** under the repo root, each with **`become`** on the target so **`/var/lib/dns-audit`** can stay `0750` root-only). After you **review** that file, the Proxmox playbook’s **`resolve`** step runs **`getaddrinfo` on the controller** and writes **`.pve-allowed-staged.txt`**; **`deploy`** copies it to the node and updates the guest firewall.
+**Trust model:** the **target host** only writes **FQDNs** per hour (`*dns-names.txt` from the systemd-resolved **journal**). IPs for the firewall are **never** taken from journal answers. The pull/merge playbook **merges** hourly names on the target into **`names-review.txt`**, refreshes **`apt-names.txt`** and **`ntp.txt`**, and **`fetch`es** all three into your repo (defaults: **`names-review.txt`**, **`apt-names.txt`**, **`ntp.txt`** under the repo root, each with **`become`** on the target so **`/var/lib/dns-audit`** can stay `0750` root-only). After you **review** that file, the Proxmox playbook’s **`resolve`** step **fetches** the current guest **`.fw`** from the node, runs **`getaddrinfo` on the controller** into **`.pve-allowed-staged.txt`**, and **merges locally** into **`.pve-fw-merged.<vmid>.fw`**; **`deploy`** copies that merged file to the node, runs **`pve-firewall compile`**, and reloads.
 
 **Prerequisites:** `ansible-playbook`, SSH to the target host and (separately) to the PVE node.
 
@@ -38,13 +38,15 @@ Default **`ansible_ssh_common_args`:** **`-o BatchMode=yes`**, **`-o StrictHostK
 
 ### 3. Resolve + Proxmox — [ansible/proxmox-update-allowed-ips.yml](ansible/proxmox-update-allowed-ips.yml)
 
+Use **`-i your.pve.node.example.com,`** and **`-e pve_vmid=<guest id>`** (or **`-e pve_vm_fw=/etc/pve/firewall/custom.fw`** to override the path). **`install`** is **optional** for the default Ansible flow (only needed for ad-hoc merge on the node; see [hacking.md](hacking.md)).
+
 | Step | Tag |
 | --- | --- |
-| Resolve **`names-review.txt`** → **`.pve-allowed-staged.txt`** on the **controller** (localhost) | `resolve` |
-| Install `proxmox-update-allowed-ips.py` on the node | `install` |
-| Copy staged file from the controller, merge into `pve_vm_fw`, `systemctl reload pve-firewall` | `deploy` |
+| **Slurp** guest **`.fw`** from **`/etc/pve/firewall/<vmid>.fw`**, write **`.pve-fw.fetched.<vmid>.fw`** on the controller; then **`names-review.txt`** → **`.pve-allowed-staged.txt`**; then local **`proxmox-update-allowed-ips.py --dry-run`** → **`.pve-fw-merged.<vmid>.fw`** | `resolve` |
+| Install `proxmox-update-allowed-ips.py` on the node (manual / on-node workflows) | `install` |
+| Copy merged **`.fw`** to the node, **`pve-firewall compile`**, **`systemctl reload pve-firewall`** | `deploy` |
 
-Typical: **`--tags resolve,deploy`** after editing **`names-review.txt`**. Defaults: **`dns_audit_names_review`** and **`dns_audit_pve_staged`** (resolve) point to **`$REPO/names-review.txt`** and **`$REPO/.pve-allowed-staged.txt`**; **`dns_audit_pve_staged_file`** (deploy) defaults to **`$REPO/.pve-allowed-staged.txt`**.
+Typical: **`--tags resolve`** then **`--tags deploy`** after editing **`names-review.txt`**. Defaults: **`dns_audit_names_review`** and **`dns_audit_pve_staged`** (resolve) point to **`$REPO/names-review.txt`** and **`$REPO/.pve-allowed-staged.txt`**; **`dns_audit_pve_merged_fw`** (deploy source) defaults to **`$REPO/.pve-fw-merged.<vmid>.fw`**.
 
 **`-e dns_resolve_ipv4_only=true`** — pass **`--ipv4-only`** to the resolver on the controller.
 

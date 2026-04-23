@@ -1,6 +1,6 @@
 ---
 # Target: static APT/NTP export, merge hourly DNS names → names-review.txt; controller: fetch for manual review.
-# Step 3 (resolve + deploy): ansible/proxmox-update-allowed-ips.yml --tags resolve,deploy
+# Step 3 (Proxmox): ansible/proxmox-update-allowed-ips.yml --tags resolve then --tags deploy (see README)
 # -e dns_target_host=…
 # -e dns_audit_fetch_src=…  audit directory on target (default /var/lib/dns-audit)
 # -e dns_audit_names_review=…  local path for names-review fetch (default repo /names-review.txt)

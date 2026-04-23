@@ -1,11 +1,41 @@
 ---
-# Step 3: resolve reviewed names on the controller, then deploy to PVE.
-# Typical: ansible-playbook --tags resolve,deploy -i 'PVE,' ansible/proxmox-update-allowed-ips.yml
+# Step 3: fetch guest .fw from PVE, resolve names on the controller, merge locally, then
+# deploy: upload merged .fw, pve-firewall compile, reload.
+# Typical: --tags install (optional) — copy helper for manual on-node use (hacking.md)
+#   ansible-playbook -i 'PVE,' -b -K --tags install ansible/proxmox-update-allowed-ips.yml
+#   ansible-playbook -i 'PVE,' -b -K -e pve_vmid=100 --tags resolve ansible/proxmox-update-allowed-ips.yml
+#   ansible-playbook -i 'PVE,' -b -K -e pve_vmid=100 --tags deploy ansible/proxmox-update-allowed-ips.yml
+# -e pve_vmid=… — guest VM id; firewall path = /etc/pve/firewall/<id>.fw (default pve_vmid: 100)
+# -e pve_vm_fw=… — full path to guest .fw on the node (overrides pve_vmid path)
 # -e dns_resolve_ipv4_only=true — IPv4 only for getaddrinfo
-# -e dns_audit_pve_staged_file=… — override staged IP list path (default repo /.pve-allowed-staged.txt)
-# -e dns_audit_names_review=… -e dns_audit_pve_staged=… — paths for resolve step (defaults names-review.txt / .pve-allowed-staged.txt under repo)
+# -e dns_audit_pve_merged_fw=… — local merged .fw for deploy (default .pve-fw-merged.<vmid>.fw under repo)
+# -e dns_audit_names_review=… -e dns_audit_pve_staged=… — resolve inputs (default names-review.txt, .pve-allowed-staged.txt)
 # Staged file format: IP # name last request: … (from dns-resolve-names-for-pve.py)
-- name: Resolve names-review to PVE staged file (localhost)
+- name: Fetch guest .fw from PVE to repo (for local merge)
+  hosts: all
+  become: true
+  gather_facts: false
+  tags: [resolve]
+  vars:
+    dns_audit_root: "{{ playbook_dir | dirname }}"
+    _pve_fw: "{{ pve_vm_fw if (pve_vm_fw is defined and pve_vm_fw | string | length > 0) else ('/etc/pve/firewall/' + (pve_vmid | default(100) | string) + '.fw') }}"
+    dns_audit_pve_fetched: "{{ dns_audit_root }}/.pve-fw.fetched.{{ pve_vmid | default(100) | string }}.fw"
+
+  tasks:
+    - name: Slurp guest firewall from node
+      ansible.builtin.slurp:
+        src: "{{ _pve_fw }}"
+      register: _pve_fw_slurp
+
+    - name: Write fetched .fw on controller
+      ansible.builtin.copy:
+        content: "{{ _pve_fw_slurp['content'] | b64decode }}"
+        dest: "{{ dns_audit_pve_fetched }}"
+        mode: "0600"
+      delegate_to: localhost
+      connection: local
+
+- name: Resolve names-review to staged file and merge with fetched .fw (localhost)
   hosts: localhost
   connection: local
   gather_facts: false
@@ -14,6 +44,8 @@
     dns_audit_root: "{{ playbook_dir | dirname }}"
     dns_audit_names_review: "{{ dns_audit_root }}/names-review.txt"
     dns_audit_pve_staged: "{{ dns_audit_root }}/.pve-allowed-staged.txt"
+    dns_audit_pve_fetched: "{{ dns_audit_root }}/.pve-fw.fetched.{{ pve_vmid | default(100) | string }}.fw"
+    dns_audit_pve_merged_fw: "{{ dns_audit_root }}/.pve-fw-merged.{{ pve_vmid | default(100) | string }}.fw"
 
   tasks:
     - name: Build .pve-allowed-staged.txt from reviewed names
@@ -26,9 +58,27 @@
         _py: "{{ ansible_python_interpreter | default('/usr/bin/python3') }}"
         _resolve_argv: "{{ [_py, dns_audit_root + '/lib/dns-resolve-names-for-pve.py', '--names-review', dns_audit_names_review, '--pve-staged', dns_audit_pve_staged] + (['--ipv4-only'] if (dns_resolve_ipv4_only | default(false) | bool) else []) }}"
 
+    - name: Local merge (dry-run) into .pve-fw-merged file
+      ansible.builtin.command:
+        argv: "{{ _merge_dryrun_argv }}"
+      register: _merged_fw_content
+      changed_when: true
+      args:
+        chdir: "{{ dns_audit_root }}"
+      vars:
+        _py: "{{ ansible_python_interpreter | default('/usr/bin/python3') }}"
+        _merge_dryrun_argv: "{{ [_py, dns_audit_root + '/lib/proxmox-update-allowed-ips.py', '--firewall', dns_audit_pve_fetched, '--input', dns_audit_pve_staged, '--dry-run'] }}"
+
+    - name: Write merged .fw for review and deploy
+      ansible.builtin.copy:
+        content: "{{ _merged_fw_content.stdout }}"
+        dest: "{{ dns_audit_pve_merged_fw }}"
+        mode: "0600"
+
 - name: Install proxmox-update-allowed-ips on node
   hosts: all
   become: true
+  gather_facts: false
   tags: [install]
   vars:
     dns_audit_root: "{{ playbook_dir | dirname }}"
@@ -46,35 +96,29 @@
         dest: /usr/local/lib/dns-proxmox-audit/proxmox-update-allowed-ips.py
         mode: "0755"
 
-- name: Apply staged IPs to guest firewall
+- name: Upload merged .fw, compile, reload
   hosts: all
   become: true
+  gather_facts: false
   tags: [deploy]
   vars:
     dns_audit_root: "{{ playbook_dir | dirname }}"
-    dns_audit_pve_staged_file: "{{ dns_audit_root }}/.pve-allowed-staged.txt"
-    pve_staged_on_node: /var/tmp/dns-allowed-pve-staged.txt
-    _pve_fw: "{{ pve_vm_fw | default('/etc/pve/firewall/100.fw') }}"
+    _pve_fw: "{{ pve_vm_fw if (pve_vm_fw is defined and pve_vm_fw | string | length > 0) else ('/etc/pve/firewall/' + (pve_vmid | default(100) | string) + '.fw') }}"
+    dns_audit_pve_merged_fw: "{{ dns_audit_root }}/.pve-fw-merged.{{ pve_vmid | default(100) | string }}.fw"
 
   tasks:
-    - name: Copy staged file to PVE
+    - name: Install merged .fw to node
       ansible.builtin.copy:
-        src: "{{ dns_audit_pve_staged_file }}"
-        dest: "{{ pve_staged_on_node }}"
+        src: "{{ dns_audit_pve_merged_fw }}"
+        dest: "{{ _pve_fw }}"
         mode: "0600"
 
-    - name: Merge into Proxmox firewall file
+    - name: pve-firewall compile
       ansible.builtin.command:
-        argv:
-          - python3
-          - /usr/local/lib/dns-proxmox-audit/proxmox-update-allowed-ips.py
-          - --firewall
-          - "{{ _pve_fw }}"
-          - --input
-          - "{{ pve_staged_on_node }}"
-      register: _merge
-      changed_when: _merge.rc == 0
-      failed_when: _merge.rc != 0
+        cmd: pve-firewall compile
+      register: _compile
+      failed_when: _compile.rc != 0
+      changed_when: _compile.rc == 0
 
     - name: Reload pve-firewall
       ansible.builtin.command:
