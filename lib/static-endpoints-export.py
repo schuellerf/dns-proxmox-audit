@@ -106,9 +106,20 @@ def _merge_timedatectl_timesync_status(out: set[str]) -> None:
     if not m:
         return
     raw = m.group(1).strip()
-    if "(" in raw:
-        raw = raw.split("(", 1)[0].strip()
-    if raw:
+    pair = re.match(r"^(.+?)\s*\(([^)]+)\)\s*$", raw)
+    if pair:
+        left, right = pair.group(1).strip(), pair.group(2).strip()
+        lip, rip = _is_ip_literal(left), _is_ip_literal(right)
+        # e.g. "185.x (ntp.ubuntu.com)" or "ntp.ubuntu.com (185.x)"
+        if lip and not rip:
+            _add_ntp_hostname(out, right)
+        elif not lip and rip:
+            _add_ntp_hostname(out, left)
+        elif not lip and not rip:
+            _add_ntp_hostname(out, left)
+            _add_ntp_hostname(out, right)
+        # both IPs: omit
+    else:
         _add_ntp_hostname(out, raw)
 
 
