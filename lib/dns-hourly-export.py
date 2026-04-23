@@ -26,6 +26,7 @@ from audit_export_common import (  # noqa: E402
     parse_iso_dt,
     previous_hour_range,
 )
+from dns_audit_names_lib import is_allowlist_relevant_name  # noqa: E402
 
 OUT_SUFFIX = "dns-names.txt"
 
@@ -87,10 +88,11 @@ def extract_names_from_line(text: str) -> set[str]:
                 continue
             n = _normalize_name(name)
             if _is_plausible_fqdn(n) or n.count(".") >= 1:
-                out.add(n)
+                if is_allowlist_relevant_name(n):
+                    out.add(n)
     for m in _FQDN.finditer(text):
         n = _normalize_name(m.group(1))
-        if _is_plausible_fqdn(n):
+        if _is_plausible_fqdn(n) and is_allowlist_relevant_name(n):
             out.add(n)
     return out
 

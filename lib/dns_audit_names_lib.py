@@ -14,6 +14,25 @@ _HOURLY_FNAME = re.compile(r"^(\d{10})([+-]\d{4})-dns-names\.txt$")
 
 _NAMES_REVIEW_MARKER = " # last request: "
 
+# SRV QNAMEs (e.g. apt mirror discovery): not used for direct A/AAAA egress allowlists.
+_SRV_QNAME_PREFIX = re.compile(r"^_[a-z0-9-]+\._(tcp|udp)\.", re.IGNORECASE)
+
+
+def is_allowlist_relevant_name(name: str) -> bool:
+    """True if the name is a forward host-style QNAME worth A/AAAA resolution for egress review.
+
+    Drops reverse (PTR) zones and SRV labels; those still appear in resolved logs but are
+    redundant or wrong for getaddrinfo-based destination allowlisting.
+    """
+    n = name.strip().lower().rstrip(".")
+    if not n or "." not in n:
+        return False
+    if n.endswith(".in-addr.arpa") or n.endswith(".ip6.arpa"):
+        return False
+    if _SRV_QNAME_PREFIX.match(n):
+        return False
+    return True
+
 
 def parse_hourly_filename(path: Path) -> datetime | None:
     m = _HOURLY_FNAME.match(path.name)
@@ -59,6 +78,8 @@ def load_hourly(input_dir: Path) -> dict[str, datetime]:
             n = n.rstrip(".")
             if not n or "." not in n:
                 continue
+            if not is_allowlist_relevant_name(n):
+                continue
             if n not in last or last[n] < ts:
                 last[n] = ts
     return last
@@ -82,6 +103,8 @@ def load_names_review(path: Path) -> dict[str, datetime]:
         name = name.strip().lower().rstrip(".")
         ts_s = ts_part.strip()
         if not name or "." not in name:
+            continue
+        if not is_allowlist_relevant_name(name):
             continue
         try:
             ts = datetime.strptime(ts_s, "%Y%m%d%H%z")
@@ -120,6 +143,8 @@ def resolve_name(name: str, ipv4_only: bool) -> tuple[list[str], str | None]:
 def write_pve_staged(path: Path, last: dict[str, datetime], ipv4_only: bool) -> int:
     pve_lines: list[str] = []
     for n in sorted(last):
+        if not is_allowlist_relevant_name(n):
+            continue
         fr = format_last_request(last[n])
         ips, err = resolve_name(n, ipv4_only)
         if err:
