@@ -1,7 +1,4 @@
-# Install: /etc/systemd/system/dns-hourly-export.timer
-#
-#   sudo install -m 0644 dns-hourly-export.timer /etc/systemd/system/
-#   sudo systemctl enable --now dns-hourly-export.timer
+# Ship to /etc/systemd/system/dns-hourly-export.timer
 
 [Unit]
 Description=Run dns-hourly-export every hour (previous local hour)

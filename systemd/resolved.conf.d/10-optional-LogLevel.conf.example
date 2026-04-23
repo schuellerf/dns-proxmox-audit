@@ -2,10 +2,6 @@
 # Environment= line. Do not combine both to debug level at once.
 # Install: rename to 10-optional-LogLevel.conf and drop under /etc/systemd/resolved.conf.d/
 #
-#   sudo install -d -m 0755 /etc/systemd/resolved.conf.d
-#   sudo install -m 0644 10-optional-LogLevel.conf /etc/systemd/resolved.conf.d/
-#   sudo systemctl restart systemd-resolved
-#
 # Verify: man resolved.conf on your OS for the exact [Resolve] key name.
 
 # [Resolve]

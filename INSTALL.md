@@ -1,5 +1,7 @@
 # DNS audit + Proxmox `allowed-ips` — install
 
+**Overview:** see [README.md](README.md) for the use case (observed DNS names to reviewed IPs to Proxmox firewall, **mainly to restrict outgoing** traffic to allowed destinations).
+
 **Trust model:** the **journal host** only writes **FQDNs** per hour (`*dns-names.txt`). IPs for the firewall are **never** taken from journal answers. You **rsync** those files to the **Ansible controller**, run [lib/dns-resolve-and-stage-for-pve.py](lib/dns-resolve-and-stage-for-pve.py) there (DNS = controller’s resolver), **review** output, then deploy to Proxmox.
 
 **Prerequisites:** `ansible-playbook`, SSH to the journal host and (separately) to the PVE node; `rsync` over SSH for the pull playbook.
