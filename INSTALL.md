@@ -4,7 +4,7 @@
 
 **Tested on Ubuntu;** for outgoing TCP/UDP ports to allow toward mirrors, NTP, and DNS, see the **Outgoing access** section in [README.md](README.md).
 
-**Trust model:** the **target host** only writes **FQDNs** per hour (`*dns-names.txt` from the systemd-resolved **journal**). IPs for the firewall are **never** taken from journal answers. The pull/merge playbook **merges** those files on the target into **`names-review.txt`** and **`fetch`es** **`.names-review.txt`** into your repo. After you **review** that file, the Proxmox playbook’s **`resolve`** step runs **`getaddrinfo` on the controller** and writes **`.pve-allowed-staged.txt`**; **`deploy`** copies it to the node and updates the guest firewall.
+**Trust model:** the **target host** only writes **FQDNs** per hour (`*dns-names.txt` from the systemd-resolved **journal**). IPs for the firewall are **never** taken from journal answers. The pull/merge playbook **merges** those files on the target into **`names-review.txt`** and **`fetch`es** it into your repo as **`names-review.txt`** (with **`become`** so the audit dir stays `0750` root-only). After you **review** that file, the Proxmox playbook’s **`resolve`** step runs **`getaddrinfo` on the controller** and writes **`.pve-allowed-staged.txt`**; **`deploy`** copies it to the node and updates the guest firewall.
 
 **Prerequisites:** `ansible-playbook`, SSH to the target host and (separately) to the PVE node.
 
@@ -28,7 +28,7 @@ The playbook also installs [lib/static-endpoints-export.py](lib/static-endpoints
 
 ### 2. Pull, merge, fetch — [ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml)
 
-Use **`-i your.target.example.com,`** and **`-e dns_target_host=…`** (must match the inventory host); optional **`-e ansible_user=...`**, **`-e ansible_ssh_private_key_file=...`**, `~/.ssh/config`. On the **target:** `static-endpoints-export.py` and **`dns-merge-hourly-names.py`** (under **`/usr/local/lib/dns-proxmox-audit/`**) with `sudo` **`-n`**. **`ansible.builtin.fetch`** copies **`names-review.txt`** to the repo default **`.names-review.txt`** (override with **`dns_audit_names_review`**).
+Use **`-i your.target.example.com,`** and **`-e dns_target_host=…`** (must match the inventory host); optional **`-e ansible_user=...`**, **`-e ansible_ssh_private_key_file=...`**, `~/.ssh/config`. On the **target:** `static-endpoints-export.py` and **`dns-merge-hourly-names.py`** (under **`/usr/local/lib/dns-proxmox-audit/`**) with `sudo` **`-n`**. **`ansible.builtin.fetch`** (as root on the target) copies **`names-review.txt`** to the repo default **`names-review.txt`** (override with **`dns_audit_names_review`**).
 
 Input dir on the target defaults to **`/var/lib/dns-audit`** (override with **`dns_audit_fetch_src`**). Merge reads hourly `*dns-names.txt` there and writes **`names-review.txt`** in that directory.
 
@@ -40,11 +40,11 @@ Default **`ansible_ssh_common_args`:** **`-o BatchMode=yes`**, **`-o StrictHostK
 
 | Step | Tag |
 | --- | --- |
-| Resolve **`.names-review.txt`** → **`.pve-allowed-staged.txt`** on the **controller** (localhost) | `resolve` |
+| Resolve **`names-review.txt`** → **`.pve-allowed-staged.txt`** on the **controller** (localhost) | `resolve` |
 | Install `proxmox-update-allowed-ips.py` on the node | `install` |
 | Copy staged file from the controller, merge into `pve_vm_fw`, `systemctl reload pve-firewall` | `deploy` |
 
-Typical: **`--tags resolve,deploy`** after editing **`.names-review.txt`**. Defaults: **`dns_audit_names_review`** and **`dns_audit_pve_staged`** (resolve) point to **`$REPO/.names-review.txt`** and **`$REPO/.pve-allowed-staged.txt`**; **`dns_audit_pve_staged_file`** (deploy) defaults to **`$REPO/.pve-allowed-staged.txt`**.
+Typical: **`--tags resolve,deploy`** after editing **`names-review.txt`**. Defaults: **`dns_audit_names_review`** and **`dns_audit_pve_staged`** (resolve) point to **`$REPO/names-review.txt`** and **`$REPO/.pve-allowed-staged.txt`**; **`dns_audit_pve_staged_file`** (deploy) defaults to **`$REPO/.pve-allowed-staged.txt`**.
 
 **`-e dns_resolve_ipv4_only=true`** — pass **`--ipv4-only`** to the resolver on the controller.
 

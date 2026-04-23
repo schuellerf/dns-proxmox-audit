@@ -3,7 +3,7 @@
 # Typical: ansible-playbook --tags resolve,deploy -i 'PVE,' ansible/proxmox-update-allowed-ips.yml
 # -e dns_resolve_ipv4_only=true — IPv4 only for getaddrinfo
 # -e dns_audit_pve_staged_file=… — override staged IP list path (default repo /.pve-allowed-staged.txt)
-# -e dns_audit_names_review=… -e dns_audit_pve_staged=… — paths for resolve step (defaults .names-review.txt / .pve-allowed-staged.txt under repo)
+# -e dns_audit_names_review=… -e dns_audit_pve_staged=… — paths for resolve step (defaults names-review.txt / .pve-allowed-staged.txt under repo)
 # Staged file format: IP # name last request: … (from dns-resolve-names-for-pve.py)
 - name: Resolve names-review to PVE staged file (localhost)
   hosts: localhost
@@ -12,7 +12,7 @@
   tags: [resolve]
   vars:
     dns_audit_root: "{{ playbook_dir | dirname }}"
-    dns_audit_names_review: "{{ dns_audit_root }}/.names-review.txt"
+    dns_audit_names_review: "{{ dns_audit_root }}/names-review.txt"
     dns_audit_pve_staged: "{{ dns_audit_root }}/.pve-allowed-staged.txt"
 
   tasks:

@@ -7,7 +7,7 @@ This project intends to learn which DNS names a machine actually queries over ti
 **Three steps:**
 
 1. **Target host (audit):** Log DNS activity and write **names-only** hourly files (FQDNs you observed—no “trust the answer IP from the log” on this machine).
-2. **Pull / merge / fetch:** On the audit host, merge hourly files into **`names-review.txt`** and **`fetch`** **`.names-review.txt`** into the repo. **Edit that file** after review.
+2. **Pull / merge / fetch:** On the audit host, merge hourly files into **`names-review.txt`** and **`fetch`** that file into the repo as **`names-review.txt`** (repo root). **Edit it** after review.
 3. **Resolve and Proxmox:** On the **controller**, run **`getaddrinfo`** to build **`.pve-allowed-staged.txt`**, then copy it to the node and merge into the guest firewall (**`resolve`** + **`deploy`** tags).
 
 ## Ansible quick start (three playbooks)
@@ -26,7 +26,7 @@ cd /path/to/dns-proxmox-audit
 ansible-playbook -i "$TARGET_HOST," -b -K ansible/dns-audit.yml
 ```
 
-**2. Pull and merge** — on the target: static export + merge hourly names; **fetch** **`.names-review.txt`** into the repo (review and edit it before step 3):
+**2. Pull and merge** — on the target: static export + merge hourly names; **fetch** **`names-review.txt`** into the repo (review and edit it before step 3):
 
 ```bash
 ansible-playbook -i "$TARGET_HOST," -b -K ansible/dns-audit-pull-merge.yml -e dns_target_host="$TARGET_HOST"
@@ -41,7 +41,7 @@ ansible-playbook -i "$PVE_HOST," -b -K ansible/proxmox-update-allowed-ips.yml --
   -e pve_vm_fw=/etc/pve/firewall/100.fw
 ```
 
-Default paths under the repo are **`.names-review.txt`** and **`.pve-allowed-staged.txt`**. Use **`-e dns_resolve_ipv4_only=true`** on the resolve/deploy playbook if you want IPv4 only. Override paths with **`-e dns_audit_names_review=…`**, **`-e dns_audit_pve_staged=…`** (resolve step) or **`-e dns_audit_pve_staged_file=…`** (deploy copy source).
+Default paths under the repo are **`names-review.txt`** and **`.pve-allowed-staged.txt`**. Use **`-e dns_resolve_ipv4_only=true`** on the resolve/deploy playbook if you want IPv4 only. Override paths with **`-e dns_audit_names_review=…`**, **`-e dns_audit_pve_staged=…`** (resolve step) or **`-e dns_audit_pve_staged_file=…`** (deploy copy source). Fetch uses **`become`** so the controller can read **`/var/lib/dns-audit`** (mode `0750`).
 
 More detail: [INSTALL.md](INSTALL.md). Manual steps: [hacking.md](hacking.md).
 

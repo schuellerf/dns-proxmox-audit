@@ -90,7 +90,7 @@ sudo /usr/local/lib/dns-proxmox-audit/static-endpoints-export.py
 
 ## Part 2b — Pull, merge, fetch
 
-[ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) runs **`dns-merge-hourly-names.py`** on the **target**, then **`fetch`es** **`names-review.txt`** into the repo as **`.names-review.txt`**. Re-run [ansible/dns-audit.yml](ansible/dns-audit.yml) on the target after pulling new `lib/` files.
+[ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) runs **`dns-merge-hourly-names.py`** on the **target**, then **`fetch`es** **`names-review.txt`** into the repo as **`names-review.txt`** (fetch uses **`become`** because **`/var/lib/dns-audit`** is **`0750`**). Re-run [ansible/dns-audit.yml](ansible/dns-audit.yml) on the target after pulling new `lib/` files.
 
 **Manual on the target** (merge hourly files under the audit dir):
 
@@ -98,7 +98,7 @@ sudo /usr/local/lib/dns-proxmox-audit/static-endpoints-export.py
 sudo /usr/local/lib/dns-proxmox-audit/dns-merge-hourly-names.py
 ```
 
-**Manual on the controller** (after review; from repo root, defaults `.names-review.txt` → `.pve-allowed-staged.txt`):
+**Manual on the controller** (after review; from repo root, defaults `names-review.txt` → `.pve-allowed-staged.txt`):
 
 ```bash
 python3 lib/dns-resolve-names-for-pve.py

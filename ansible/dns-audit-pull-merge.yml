@@ -3,7 +3,7 @@
 # Step 3 (resolve + deploy): ansible/proxmox-update-allowed-ips.yml --tags resolve,deploy
 # -e dns_target_host=…
 # -e dns_audit_fetch_src=…  audit directory on target (default /var/lib/dns-audit)
-# -e dns_audit_names_review=…  local path for fetch (default repo /.names-review.txt)
+# -e dns_audit_names_review=…  local path for fetch (default repo /names-review.txt)
 # -e ansible_ssh_private_key_file=…  -e dns_audit_ssh_common_args=…
 - name: Pull dns names and merge
   hosts: "{{ dns_target_host | default('localhost') }}"
@@ -46,9 +46,10 @@
     - name: Fetch names review to controller
       ansible.builtin.fetch:
         src: "{{ _t_names }}"
-        dest: "{{ dns_audit_names_review | default(dns_audit_root + '/.names-review.txt', true) }}"
+        dest: "{{ dns_audit_names_review | default(dns_audit_root + '/names-review.txt', true) }}"
         flat: true
-      become: false
+      become: true
+      become_flags: -n
       vars:
         _dns_a_dir: "{{ (dns_audit_fetch_src | default('/var/lib/dns-audit', true)) | regex_replace('/+$', '') }}"
         _t_names: "{{ _dns_a_dir }}/names-review.txt"

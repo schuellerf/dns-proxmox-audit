@@ -19,7 +19,7 @@ def main() -> int:
     ap.add_argument(
         "--names-review",
         type=Path,
-        default=Path(".names-review.txt"),
+        default=Path("names-review.txt"),
         help="Input: merged FQDN list with last-request timestamps",
     )
     ap.add_argument(
