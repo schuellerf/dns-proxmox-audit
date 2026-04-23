@@ -1,0 +1,22 @@
+---
+# Proxmox node only: install the IPSET merge helper script.
+# Run explicitly when needed; does not enable services, timers, or any automation.
+# From repo root: ansible-playbook -i 'PVE_HOST,' -b -K ansible/proxmox-update-allowed-ips.yml
+- name: Install proxmox-update-allowed-ips helper
+  hosts: all
+  become: true
+  vars:
+    dns_audit_root: "{{ playbook_dir | dirname }}"
+
+  tasks:
+    - name: Ensure /usr/local/lib/dns-proxmox-audit exists
+      ansible.builtin.file:
+        path: /usr/local/lib/dns-proxmox-audit
+        state: directory
+        mode: "0755"
+
+    - name: Install proxmox-update-allowed-ips.py
+      ansible.builtin.copy:
+        src: "{{ dns_audit_root }}/lib/proxmox-update-allowed-ips.py"
+        dest: /usr/local/lib/dns-proxmox-audit/proxmox-update-allowed-ips.py
+        mode: "0755"

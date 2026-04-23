@@ -1,0 +1,119 @@
+---
+# Journal audit target only: systemd-resolved debug, journald limits, hourly export (not Proxmox).
+# Run from the dns-proxmox-audit directory: ansible-playbook -i 'TARGET,' ansible/dns-audit.yml
+# Tags: resolved | export
+- name: Install DNS journal audit
+  hosts: all
+  become: true
+  vars:
+    dns_audit_root: "{{ playbook_dir | dirname }}"
+
+  tasks:
+    - name: Ensure systemd-resolved drop-in directory exists
+      ansible.builtin.file:
+        path: /etc/systemd/system/systemd-resolved.service.d
+        state: directory
+        mode: "0755"
+      tags: [resolved]
+
+    - name: Install systemd-resolved 10-dns-audit.conf
+      ansible.builtin.copy:
+        src: "{{ dns_audit_root }}/systemd/systemd-resolved.service.d/10-dns-audit.conf"
+        dest: /etc/systemd/system/systemd-resolved.service.d/10-dns-audit.conf
+        mode: "0644"
+      tags: [resolved]
+      notify: apply_dns_audit
+
+    - name: Ensure journald.conf.d exists
+      ansible.builtin.file:
+        path: /etc/systemd/journald.conf.d
+        state: directory
+        mode: "0755"
+      tags: [resolved]
+
+    - name: Install journald 90-dns-audit-limits.conf
+      ansible.builtin.copy:
+        src: "{{ dns_audit_root }}/systemd/journald.conf.d/90-dns-audit-limits.conf"
+        dest: /etc/systemd/journald.conf.d/90-dns-audit-limits.conf
+        mode: "0644"
+      tags: [resolved]
+      notify: apply_dns_audit
+
+    - name: Ensure /usr/local/lib/dns-proxmox-audit exists
+      ansible.builtin.file:
+        path: /usr/local/lib/dns-proxmox-audit
+        state: directory
+        mode: "0755"
+      tags: [export]
+
+    - name: Install dns-hourly-export.py
+      ansible.builtin.copy:
+        src: "{{ dns_audit_root }}/lib/dns-hourly-export.py"
+        dest: /usr/local/lib/dns-proxmox-audit/dns-hourly-export.py
+        mode: "0755"
+      tags: [export]
+      notify: apply_dns_audit
+
+    - name: Ensure /etc/tmpfiles.d exists
+      ansible.builtin.file:
+        path: /etc/tmpfiles.d
+        state: directory
+        mode: "0755"
+      tags: [export]
+
+    - name: Install tmpfiles.d dns-audit.conf
+      ansible.builtin.copy:
+        src: "{{ dns_audit_root }}/systemd/tmpfiles.d/dns-audit.conf"
+        dest: /etc/tmpfiles.d/dns-audit.conf
+        mode: "0644"
+      tags: [export]
+      notify: apply_dns_audit
+
+    - name: Install dns-hourly-export.service
+      ansible.builtin.copy:
+        src: "{{ dns_audit_root }}/systemd/dns-hourly-export.service"
+        dest: /etc/systemd/system/dns-hourly-export.service
+        mode: "0644"
+      tags: [export]
+      notify: apply_dns_audit
+
+    - name: Install dns-hourly-export.timer
+      ansible.builtin.copy:
+        src: "{{ dns_audit_root }}/systemd/dns-hourly-export.timer"
+        dest: /etc/systemd/system/dns-hourly-export.timer
+        mode: "0644"
+      tags: [export]
+      notify: apply_dns_audit
+
+  handlers:
+    - name: Create tmpfiles for /var/lib/dns-audit
+      listen: apply_dns_audit
+      ansible.builtin.command:
+        cmd: systemd-tmpfiles --create /etc/tmpfiles.d/dns-audit.conf
+      changed_when: true
+
+    - name: Reload systemd (daemon-reload)
+      listen: apply_dns_audit
+      ansible.builtin.command:
+        cmd: systemctl daemon-reload
+      changed_when: true
+
+    - name: Restart systemd-journald
+      listen: apply_dns_audit
+      ansible.builtin.service:
+        name: systemd-journald
+        state: restarted
+
+    - name: Restart systemd-resolved
+      listen: apply_dns_audit
+      ansible.builtin.service:
+        name: systemd-resolved
+        state: restarted
+
+    - name: Enable and start dns-hourly-export.timer
+      listen: apply_dns_audit
+      ansible.builtin.systemd:
+        name: dns-hourly-export.timer
+        state: started
+        enabled: true
+        daemon_reload: false
