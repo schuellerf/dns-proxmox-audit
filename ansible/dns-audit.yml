@@ -68,6 +68,13 @@
         mode: "0755"
       tags: [export]
 
+    - name: Install dns-resolve-and-stage-for-pve.py
+      ansible.builtin.copy:
+        src: "{{ dns_audit_root }}/lib/dns-resolve-and-stage-for-pve.py"
+        dest: /usr/local/lib/dns-proxmox-audit/dns-resolve-and-stage-for-pve.py
+        mode: "0755"
+      tags: [export]
+
     - name: Ensure /etc/tmpfiles.d exists
       ansible.builtin.file:
         path: /etc/tmpfiles.d

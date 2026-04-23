@@ -4,9 +4,9 @@
 
 **Tested on Ubuntu;** for outgoing TCP/UDP ports to allow toward mirrors, NTP, and DNS, see the **Outgoing access** section in [README.md](README.md).
 
-**Trust model:** the **target host** only writes **FQDNs** per hour (`*dns-names.txt` from the systemd-resolved **journal**). IPs for the firewall are **never** taken from journal answers. You **rsync** those files to the **Ansible controller**, run [lib/dns-resolve-and-stage-for-pve.py](lib/dns-resolve-and-stage-for-pve.py) there (DNS = controller’s resolver), **review** output, then deploy to Proxmox.
+**Trust model:** the **target host** only writes **FQDNs** per hour (`*dns-names.txt` from the systemd-resolved **journal**). IPs for the firewall are **never** taken from journal answers. The pull/merge playbook runs the merge and optional IP resolution on the **target**; **`ansible.builtin.fetch`** copies the merged file(s) into your repo. **`getaddrinfo`** then uses the **target’s** DNS. Review the fetched files, then deploy to Proxmox.
 
-**Prerequisites:** `ansible-playbook`, SSH to the target host and (separately) to the PVE node; `rsync` over SSH for the pull playbook.
+**Prerequisites:** `ansible-playbook`, SSH to the target host and (separately) to the PVE node.
 
 ### 1. Target host — [ansible/dns-audit.yml](ansible/dns-audit.yml)
 
@@ -17,6 +17,7 @@
 | [lib/audit_export_common.py](lib/audit_export_common.py) | `/usr/local/lib/dns-proxmox-audit/audit_export_common.py` |
 | [lib/dns-hourly-export.py](lib/dns-hourly-export.py) | `/usr/local/lib/dns-proxmox-audit/dns-hourly-export.py` |
 | [lib/static-endpoints-export.py](lib/static-endpoints-export.py) | `/usr/local/lib/dns-proxmox-audit/static-endpoints-export.py` (APT + NTP host lists) |
+| [lib/dns-resolve-and-stage-for-pve.py](lib/dns-resolve-and-stage-for-pve.py) | `/usr/local/lib/dns-proxmox-audit/dns-resolve-and-stage-for-pve.py` (merge + optional PVE line list) |
 | [systemd/dns-hourly-export.service](systemd/dns-hourly-export.service), [systemd/dns-hourly-export.timer](systemd/dns-hourly-export.timer) | `/etc/systemd/system/` |
 | [systemd/tmpfiles.d/dns-audit.conf](systemd/tmpfiles.d/dns-audit.conf) | `/etc/tmpfiles.d/dns-audit.conf` |
 
@@ -24,18 +25,18 @@ Hourly files under the default output dir (`/var/lib/dns-audit/`) look like `YYY
 
 The playbook also installs [lib/static-endpoints-export.py](lib/static-endpoints-export.py) so you can run it manually on the target (`sudo …/static-endpoints-export.py`); the timer does **not** run it.
 
-### 2. Controller — pull, merge, resolve — [ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml)
+### 2. Controller — pull, merge, fetch — [ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml)
 
-The play’s `hosts` is the same name you put in the inventory: use **`-i your.target.example.com,`** and **`-e dns_target_host=…`** (or deprecated **`dns_journal_host`**) to that host; optional **`-e ansible_user=...`**, **`-e ansible_ssh_private_key_file=...`**, `~/.ssh/config`. On the target: `static-endpoints-export.py` with `sudo` **`-n`**. Rsync to **`.pulled-audit`**, merge, and review outputs run on the controller (**`delegate_to: localhost`**, **`connection: local`**).
+Use **`-i your.target.example.com,`** and **`-e dns_target_host=…`** (or deprecated **`dns_journal_host`**); optional **`-e ansible_user=...`**, **`-e ansible_ssh_private_key_file=...`**, `~/.ssh/config`. On the **target:** `static-endpoints-export.py` and **`dns-resolve-and-stage-for-pve.py`** (both under **`/usr/local/lib/dns-proxmox-audit/`** after [ansible/dns-audit.yml](ansible/dns-audit.yml)) with `sudo` **`-n`**. **`ansible.builtin.fetch`** then copies the merged output(s) to paths under the repo (default **`.names-review.txt`**, **`.pve-allowed-staged.txt`**; override with **`dns_audit_names_review`**, **`dns_audit_pve_staged`**).
 
-Rsync source on the target defaults to `/var/lib/dns-audit` (override with **`dns_audit_fetch_src`**). Pull includes `apt-names.txt` and `ntp.txt` and hourly `*dns-names.txt` files. Writes **`.names-review.txt`** and (by default) **`.pve-allowed-staged.txt`** under the repo.
+Input dir on the target defaults to **`/var/lib/dns-audit`** (override with **`dns_audit_fetch_src`**). Merge reads hourly `*dns-names.txt` there; it writes **`names-review.txt`** and, if **`dns_merge_emit_pve`**, **`pve-allowed-staged.txt`** in that same directory, then fetches them.
 
-Default **`ansible_ssh_common_args`:** **`-o BatchMode=yes`**, **`-o StrictHostKeyChecking=accept-new`**. Set **`dns_audit_ssh_common_args`** to replace the whole `ssh` option string.
+Default **`ansible_ssh_common_args`:** **`-o BatchMode=yes`**, **`-o StrictHostKeyChecking=accept-new`**. Set **`dns_audit_ssh_common_args`** to replace the whole `ssh` option string for the play connection (used for SSH + **`fetch`**).
 
-- `-e dns_merge_emit_pve=false` — names review only, no `getaddrinfo`.
-- `-e dns_merge_ipv4_only=true` — only IPv4 when resolving.
+- `-e dns_merge_emit_pve=false` — only the merged names file; no `getaddrinfo` on the target.
+- `-e dns_merge_ipv4_only=true` — only IPv4 when resolving (with `dns_merge_emit_pve` true).
 
-`gather_facts: false`. Default **`dns_merge_python`:** `/usr/bin/python3`; override with **`-e dns_merge_python=...`**.
+`gather_facts: false`. Default **`dns_merge_python`:** `/usr/bin/python3` on the target; override with **`-e dns_merge_python=...`**.
 
 ### 3. Proxmox — [ansible/proxmox-update-allowed-ips.yml](ansible/proxmox-update-allowed-ips.yml)
 

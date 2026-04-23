@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Merge per-hour *dns-names.txt (from a trusted pull) and optionally resolve to IPs
-on this machine (controller / Ansible host). DNS uses this host's resolver, not
-the target (audit) host.
+Merge per-hour *dns-names.txt under --input-dir and optionally resolve to IPs on
+this machine. DNS / getaddrinfo uses this host's resolver (controller or audit
+host, depending on where you run the script).
 """
 
 from __future__ import annotations

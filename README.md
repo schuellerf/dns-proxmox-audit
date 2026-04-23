@@ -7,7 +7,7 @@ This project intends to learn which DNS names a machine actually queries over ti
 **Three stages (conceptual):**
 
 1. **Target host (audit):** Log DNS activity and write **names-only** hourly files (FQDNs you observed—no “trust the answer IP from the log” on this machine).
-2. **Controller (merge and resolve):** Copy those files to the machine you trust, merge “last seen” per name, **resolve names to A/AAAA on the controller**, review the result.
+2. **Controller (merge and fetch):** Run the pull-merge playbook: merge on the **audit host**, **`fetch`** merged lists into the repo; review (with **`--emit-pve`**, names resolve on the **target**).
 3. **Proxmox (deploy):** Copy the reviewed staged file to the node, run the merge script into the guest firewall file, **reload the firewall** so the updated **outgoing-destination allowlist** (and related rules) takes effect.
 
 ## Ansible quick start (three playbooks)
@@ -26,11 +26,12 @@ cd /path/to/dns-proxmox-audit
 ansible-playbook -i "$TARGET_HOST," -b -K ansible/dns-audit.yml
 ```
 
-**2. Controller** — `-e dns_target_host=…`: static export on the target, `rsync` to `.pulled-audit`, merge/resolve on the controller:
+**2. Controller** — `-e dns_target_host=…`: on the target, static export + merge (and optional PVE resolve), then `fetch` merged file(s) into the repo:
 
 ```bash
 ansible-playbook -i "$TARGET_HOST," -b -K ansible/dns-audit-pull-merge.yml -e dns_target_host="$TARGET_HOST"
 ```
+(`-b -K` if the target user needs a sudo password; merge uses the **target** resolver when emitting PVE lines.)
 
 **3. Proxmox** — install the firewall helper, then (after review) deploy the staged file from this repo on the controller:
 
