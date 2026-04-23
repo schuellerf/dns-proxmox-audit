@@ -141,7 +141,7 @@ def _offset_in_filename(dt: datetime) -> str:
 
 def _filename_for_start_hour(start: datetime) -> str:
     ymdh = start.strftime("%Y%m%d%H")
-    return f"{ymdh}_{_offset_in_filename(start)}-{OUT_SUFFIX}"
+    return f"{ymdh}{_offset_in_filename(start)}-{OUT_SUFFIX}"
 
 
 def run_export(
@@ -186,7 +186,7 @@ def main() -> None:
         "--output-dir",
         type=Path,
         default=Path("/var/lib/dns-audit"),
-        help=f"Directory for YYYYMMDDHH_+oooo-{OUT_SUFFIX} (%%z at hour start)",
+        help=f"Directory for YYYYMMDDHH+oooo-{OUT_SUFFIX} (%%z at hour start, no separator before offset)",
     )
     ap.add_argument(
         "--since",

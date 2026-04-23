@@ -42,7 +42,7 @@ If the unit fails (unknown `LogFilterPatterns=` on older systemd): install [10-d
 
 **Output directory (hourly files):** `/var/lib/dns-audit/`
 
-**Filename pattern:** e.g. `2026032914_+0100-dns-names.txt`: wall-clock **start** of the hour, `_`, then `strftime("%z")`. Each file lists **one FQDN per line** (no IPs; used for names-seen-only audit).
+**Filename pattern:** e.g. `2026032914+0100-dns-names.txt`: wall-clock **start** of the hour, then `strftime("%z")` (no separator before the offset). Files produced before that change may use `2026032914_+0100-…`. Each file lists **one FQDN per line** (no IPs; used for names-seen-only audit).
 
 **Commands:**
 

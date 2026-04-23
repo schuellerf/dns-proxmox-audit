@@ -14,7 +14,8 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-_FNAME = re.compile(r"^(\d{10})_([+-]\d{4})-dns-names\.txt$")
+# Optional _ between ymdh and offset: legacy 2026…_+0100-… vs current 2026…+0100-…
+_FNAME = re.compile(r"^(\d{10})_?([+-]\d{4})-dns-names\.txt$")
 
 
 def _parse_filename(path: Path) -> datetime | None:
@@ -92,7 +93,7 @@ def main() -> int:
         "--input-dir",
         type=Path,
         required=True,
-        help="Directory of YYYYMMDDHH_+ooook-dns-names.txt files (pulled from audit host)",
+        help="Directory of hourly *dns-names.txt (YYYYMMDDHH+0000-dns-names.txt; legacy _+0000 also accepted)",
     )
     ap.add_argument(
         "--names-review",

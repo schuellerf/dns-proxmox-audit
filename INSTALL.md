@@ -16,7 +16,7 @@
 | [systemd/dns-hourly-export.service](systemd/dns-hourly-export.service), [systemd/dns-hourly-export.timer](systemd/dns-hourly-export.timer) | `/etc/systemd/system/` |
 | [systemd/tmpfiles.d/dns-audit.conf](systemd/tmpfiles.d/dns-audit.conf) | `/etc/tmpfiles.d/dns-audit.conf` |
 
-Hourly files under `/var/lib/dns-audit/` look like `YYYYMMDDHH_+0100-dns-names.txt` (one FQDN per line).
+Hourly files under `/var/lib/dns-audit/` look like `YYYYMMDDHH+0100-dns-names.txt` (one FQDN per line; older exports may have `…HH_+0100-…` with an extra underscore, still supported when merging).
 
 ```bash
 cd /path/to/dns-proxmox-audit
