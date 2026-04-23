@@ -26,7 +26,7 @@ cd /path/to/dns-proxmox-audit
 ansible-playbook -i "$TARGET_HOST," -b -K ansible/dns-audit.yml
 ```
 
-**2. Controller** — refresh static `apt-names.txt` / `ntp.txt` on the target over SSH, `rsync` the audit directory, merge DNS names, optional resolve to IPs (run on the host where you keep the repo; needs SSH to `$TARGET_HOST`):
+**2. Controller** — this play uses your normal `ssh` to `$TARGET_HOST` (via **`-e dns_target_host=`** and optional inventory/SSH options), runs static export on the target, `rsync`s the audit tree into the clone, then merge/resolve (run from the host where you keep the repo):
 
 ```bash
 ansible-playbook ansible/dns-audit-pull-merge.yml -e dns_target_host="$TARGET_HOST"

@@ -26,12 +26,16 @@ The playbook also installs [lib/static-endpoints-export.py](lib/static-endpoints
 
 ### 2. Controller — pull, merge, resolve — [ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml)
 
-Runs `static-endpoints-export.py` on the **target** over SSH (`sudo` required), then `rsync` from the target to `dns-proxmox-audit/.pulled-audit/`. The pull includes `apt-names.txt` and `ntp.txt` (snapshot, not time-prefixed) for review alongside the hourly `*dns-names.txt` files, then runs the merge script. Writes `.names-review.txt` and (by default) `.pve-allowed-staged.txt` next to the repo. Extra var: `dns_target_host` (or deprecated `dns_journal_host`).
+The play **connects to the audit target** (same SSH and inventory as any normal playbook: **`-e dns_target_host=...`** or deprecated **`dns_journal_host`**; optional **`-e ansible_user=...`**, **`-e ansible_ssh_private_key_file=...`**, and host/SSH config as usual). On the target it runs `static-endpoints-export.py` with `sudo` **`-n`** (non-interactive; passwordless **sudo** is required for that). The merge step, local pull directory, and `rsync` from the target run on the **Ansible controller** via **`delegate_to: localhost`**.
+
+`rsync` pulls to `dns-proxmox-audit/.pulled-audit/`. The pull includes `apt-names.txt` and `ntp.txt` (snapshot, not time-prefixed) for review alongside the hourly `*dns-names.txt` files, then runs the merge script. Writes `.names-review.txt` and (by default) `.pve-allowed-staged.txt` next to the repo.
+
+The SSH connection to the play host defaults to **`-o BatchMode=yes`**, **`-o StrictHostKeyChecking=accept-new`**; override the full extra args for `ssh` with **`-e 'dns_audit_ssh_common_args=…'`** (for example a different `StrictHostKeyChecking` or password-based auth) if you need to.
 
 - `-e dns_merge_emit_pve=false` — names-only list, no `getaddrinfo` on the controller.
 - `-e dns_merge_ipv4_only=true` — only IPv4 when resolving.
 
-The playbook does **not** run Ansible fact gathering and pins **`ansible_python_interpreter`** and the merge step’s Python to **`/usr/bin/python3`** by default, so a broken **pyenv**/`PATH` on the controller does not break the run. Override with **`-e ansible_python_interpreter=...`** or **`-e dns_merge_python=...`** if your system Python lives elsewhere.
+The playbook does **not** run Ansible fact gathering. The merge step uses **`/usr/bin/python3`** for **`dns_merge_python`** by default, so a broken **pyenv**/`PATH` on the controller does not break the run. Override with **`-e dns_merge_python=...`** if your system Python lives elsewhere.
 
 ### 3. Proxmox — [ansible/proxmox-update-allowed-ips.yml](ansible/proxmox-update-allowed-ips.yml)
 

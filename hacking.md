@@ -86,7 +86,7 @@ sudo /usr/local/lib/dns-proxmox-audit/static-endpoints-export.py
 
 ## Part 2b — Controller: pull, merge, resolve (trusted)
 
-On the machine where you trust DNS (Ansible controller), use the pull-merge playbook (runs static export on the **target** first, then `rsync`) or `rsync` `/var/lib/dns-audit/` from the target yourself, then run [lib/dns-resolve-and-stage-for-pve.py](lib/dns-resolve-and-stage-for-pve.py):
+On the machine where you trust DNS (Ansible controller), use the pull-merge playbook (it **SSHs to the target** as the play, runs static export there, then `rsync`/`merge` on the controller) or `rsync` `/var/lib/dns-audit/` from the target yourself, then run [lib/dns-resolve-and-stage-for-pve.py](lib/dns-resolve-and-stage-for-pve.py):
 
 ```bash
 python3 lib/dns-resolve-and-stage-for-pve.py \

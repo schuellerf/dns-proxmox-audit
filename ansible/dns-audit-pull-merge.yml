@@ -1,52 +1,48 @@
 ---
-# Run on the Ansible controller: refresh static lists on target, rsync audit dir, merge *dns-names.txt, optional resolve to IPs.
-# -e dns_target_host=TARGET_SSH  (or deprecated -e dns_journal_host=…)
-# -e dns_merge_emit_pve=false  # names list only, no getaddrinfo on this host
-# -e ansible_python_interpreter=/usr/bin/python3  # override if needed (avoids broken pyenv shims on the controller)
-# -e dns_merge_python=/usr/bin/python3            # interpreter for dns-resolve-and-stage-for-pve.py
+# This play connects to the audit target over SSH; controller-only work uses delegate_to: localhost.
+# -e dns_target_host=TARGET_SSH  (or deprecated -e dns_journal_host=…) — required; must be the name you can ssh to
+# -e dns_merge_emit_pve=false  # names list only, no getaddrinfo on the controller
+# -e dns_merge_python=/usr/bin/python3  # merge step runs on the controller (overrides pyenv shims, etc.)
+# SSH options for the play connection: -e ansible_ssh_private_key_file=…, -e dns_audit_ssh_common_args='-o …'
+# (defaults include BatchMode and StrictHostKeyChecking=accept-new; override dns_audit_ssh_common_args for password auth, etc.)
 - name: Pull dns names and merge
-  hosts: localhost
-  connection: local
+  hosts: "{% if dns_target_host is defined and dns_target_host | string | length > 0 %}{{ dns_target_host }}{% elif dns_journal_host is defined and dns_journal_host | string | length > 0 %}{{ dns_journal_host }}{% else %}__set_dns_target_host__{% endif %}"
   gather_facts: false
   vars:
     dns_audit_root: "{{ playbook_dir | dirname }}"
     dns_audit_local_pull: "{{ dns_audit_root }}/.pulled-audit"
-    dns_audit_fetch_src: "{{ dns_audit_fetch_src | default('/var/lib/dns-audit') }}"
-    ansible_python_interpreter: /usr/bin/python3
     dns_merge_python: /usr/bin/python3
+    ansible_ssh_common_args: "{{ dns_audit_ssh_common_args | default('-o BatchMode=yes -o StrictHostKeyChecking=accept-new', true) }}"
 
   tasks:
-    - name: Resolve audit target host (dns_target_host or legacy dns_journal_host)
-      ansible.builtin.set_fact:
-        _dns_target: "{{ dns_target_host | default(dns_journal_host | default('', true), true) }}"
-
-    - name: Assert audit target host
+    - name: Assert target host is set
       ansible.builtin.assert:
         that:
-          - _dns_target is defined
-          - _dns_target | string | length > 0
-        fail_msg: "Set -e dns_target_host=TARGET_SSH (or deprecated dns_journal_host)"
+          - (dns_target_host is defined and dns_target_host | string | length > 0)
+            or (dns_journal_host is defined and dns_journal_host | string | length > 0)
+        fail_msg: "Set -e dns_target_host=TARGET_SSH (or deprecated dns_journal_host) to the audit host; it must be your SSH name for that system."
 
     - name: Ensure local pull directory
       ansible.builtin.file:
         path: "{{ dns_audit_local_pull }}"
         state: directory
         mode: "0750"
+      delegate_to: localhost
+      connection: local
+
+    - name: Save user and host for controller rsync (delegate_to localhost avoids ansible_host/ssh_user ambiguity)
+      ansible.builtin.set_fact:
+        _dns_rsync_user: "{{ (dns_audit_rsync_user | default(ansible_user, true) | default(lookup('env', 'USER'), true) | string) }}"
+        _dns_rsync_host: "{{ ansible_host | default(inventory_hostname) }}"
 
     - name: Refresh static APT and NTP host lists on target host
       ansible.builtin.command:
         argv:
-          - ssh
-          - -o
-          - BatchMode=yes
-          - -o
-          - StrictHostKeyChecking=accept-new
-          - "{{ (dns_audit_rsync_user | default(ansible_user, true)) | default(lookup('env', 'USER'), true) | string }}@{{ _dns_target }}"
-          - sudo
-          - -n
           - /usr/local/lib/dns-proxmox-audit/static-endpoints-export.py
           - --output-dir
-          - "{{ dns_audit_fetch_src }}"
+          - "{{ dns_audit_fetch_src | default('/var/lib/dns-audit', true) }}"
+      become: true
+      become_flags: -n
       changed_when: true
 
     - name: Rsync from target host
@@ -54,9 +50,13 @@
         argv:
           - rsync
           - -az
-          - "{{ (dns_audit_rsync_user | default(ansible_user, true)) | default(lookup('env', 'USER'), true) | string }}@{{ _dns_target }}:{{ dns_audit_fetch_src }}/"
+          - -e
+          - "ssh {{ dns_audit_ssh_common_args | default('-o BatchMode=yes -o StrictHostKeyChecking=accept-new', true) }}"
+          - "{{ _dns_rsync_user }}@{{ _dns_rsync_host }}:{{ dns_audit_fetch_src | default('/var/lib/dns-audit', true) }}/"
           - "{{ dns_audit_local_pull }}/"
       changed_when: true
+      delegate_to: localhost
+      connection: local
 
     - name: Merge to names review only
       ansible.builtin.command:
@@ -69,10 +69,16 @@
           - "{{ dns_audit_names_review | default(dns_audit_root + '/.names-review.txt') }}"
       when: not (dns_merge_emit_pve | default(true) | bool)
       changed_when: true
+      delegate_to: localhost
+      connection: local
 
     - name: Merge, resolve, write PVE staged
       ansible.builtin.command:
         argv: "{{ _argv }}"
+      when: dns_merge_emit_pve | default(true) | bool
+      changed_when: true
+      delegate_to: localhost
+      connection: local
       vars:
         _base:
           - "{{ dns_merge_python }}"
@@ -85,5 +91,3 @@
           - --pve-staged
           - "{{ dns_audit_pve_staged | default(dns_audit_root + '/.pve-allowed-staged.txt') }}"
         _argv: "{{ _base + (['--ipv4-only'] if (dns_merge_ipv4_only | default(false) | bool) else []) }}"
-      when: dns_merge_emit_pve | default(true) | bool
-      changed_when: true
