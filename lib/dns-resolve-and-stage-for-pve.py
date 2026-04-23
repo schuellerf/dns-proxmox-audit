@@ -2,7 +2,7 @@
 """
 Merge per-hour *dns-names.txt (from a trusted pull) and optionally resolve to IPs
 on this machine (controller / Ansible host). DNS uses this host's resolver, not
-the journal host.
+the target (audit) host.
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 ---
-# Run on the Ansible controller: rsync from journal host, merge *dns-names.txt, optional resolve to IPs.
-# -e dns_journal_host=JOURNAL_SSH
+# Run on the Ansible controller: refresh static lists on target, rsync audit dir, merge *dns-names.txt, optional resolve to IPs.
+# -e dns_target_host=TARGET_SSH  (or deprecated -e dns_journal_host=…)
 # -e dns_merge_emit_pve=false  # names list only, no getaddrinfo on this host
 - name: Pull dns names and merge
   hosts: localhost
@@ -12,11 +12,16 @@
     dns_audit_fetch_src: "{{ dns_audit_fetch_src | default('/var/lib/dns-audit') }}"
 
   tasks:
-    - name: Assert dns_journal_host
+    - name: Resolve audit target host (dns_target_host or legacy dns_journal_host)
+      ansible.builtin.set_fact:
+        _dns_target: "{{ dns_target_host | default(dns_journal_host | default('', true), true) }}"
+
+    - name: Assert audit target host
       ansible.builtin.assert:
         that:
-          - dns_journal_host is defined
-        fail_msg: "Set -e dns_journal_host=THE_JOURNAL_SSH"
+          - _dns_target is defined
+          - _dns_target | string | length > 0
+        fail_msg: "Set -e dns_target_host=TARGET_SSH (or deprecated dns_journal_host)"
 
     - name: Ensure local pull directory
       ansible.builtin.file:
@@ -24,12 +29,28 @@
         state: directory
         mode: "0750"
 
-    - name: Rsync from journal host
+    - name: Refresh static APT and NTP host lists on target host
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=accept-new
+          - "{{ (dns_audit_rsync_user | default(ansible_user, true)) | default(lookup('env', 'USER'), true) | string }}@{{ _dns_target }}"
+          - sudo
+          - -n
+          - /usr/local/lib/dns-proxmox-audit/static-endpoints-export.py
+          - --output-dir
+          - "{{ dns_audit_fetch_src }}"
+      changed_when: true
+
+    - name: Rsync from target host
       ansible.builtin.command:
         argv:
           - rsync
           - -az
-          - "{{ (dns_audit_rsync_user | default(ansible_user, true)) | default(lookup('env', 'USER'), true) | string }}@{{ dns_journal_host }}:{{ dns_audit_fetch_src }}/"
+          - "{{ (dns_audit_rsync_user | default(ansible_user, true)) | default(lookup('env', 'USER'), true) | string }}@{{ _dns_target }}:{{ dns_audit_fetch_src }}/"
           - "{{ dns_audit_local_pull }}/"
       changed_when: true
 

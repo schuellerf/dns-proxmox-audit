@@ -2,7 +2,7 @@
 
 Use this if you are **not** using Ansible (see [INSTALL.md](INSTALL.md) for playbooks) or for troubleshooting.
 
-All paths are **on the target host** (the machine running `systemd-resolved` for the audit, and a Proxmox node for the firewall tool).
+All paths are **on the target host** (the machine under audit: `systemd-resolved` and hourly export, and/or a Proxmox node for the firewall tool).
 
 ## Part 1 — systemd-resolved and journald
 
@@ -35,7 +35,9 @@ If the unit fails (unknown `LogFilterPatterns=` on older systemd): install [10-d
 
 | Repository file | Install to |
 | --- | --- |
+| [lib/audit_export_common.py](lib/audit_export_common.py) | `/usr/local/lib/dns-proxmox-audit/audit_export_common.py` (mode `0644`) |
 | [lib/dns-hourly-export.py](lib/dns-hourly-export.py) | `/usr/local/lib/dns-proxmox-audit/dns-hourly-export.py` (mode `0755`) |
+| [lib/static-endpoints-export.py](lib/static-endpoints-export.py) | `/usr/local/lib/dns-proxmox-audit/static-endpoints-export.py` (mode `0755`) |
 | [systemd/dns-hourly-export.service](systemd/dns-hourly-export.service) | `/etc/systemd/system/dns-hourly-export.service` |
 | [systemd/dns-hourly-export.timer](systemd/dns-hourly-export.timer) | `/etc/systemd/system/dns-hourly-export.timer` |
 | [systemd/tmpfiles.d/dns-audit.conf](systemd/tmpfiles.d/dns-audit.conf) | `/etc/tmpfiles.d/dns-audit.conf` (or `/usr/lib/tmpfiles.d/dns-audit.conf`) |
@@ -44,11 +46,15 @@ If the unit fails (unknown `LogFilterPatterns=` on older systemd): install [10-d
 
 **Filename pattern:** e.g. `2026032914+0100-dns-names.txt`: wall-clock **start** of the hour, then `strftime("%z")` (no separator before the offset). Files produced before that change may use `2026032914_+0100-…`. Each file lists **one FQDN per line** (no IPs; used for names-seen-only audit).
 
+**Static lists (not hourly):** `apt-names.txt` and `ntp.txt` in the same directory — **HTTP(S) mirror hostnames** from `/etc/apt` and **NTP/chrony/timesyncd** peers. Regenerated when you run [ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) (over SSH) or manually below. NTP from DHCP is not read; edge Deb822 or mirror URL formats may need manual checks.
+
 **Commands:**
 
 ```bash
 sudo install -d -m 0755 /usr/local/lib/dns-proxmox-audit
+sudo install -m 0644 lib/audit_export_common.py /usr/local/lib/dns-proxmox-audit/
 sudo install -m 0755 lib/dns-hourly-export.py /usr/local/lib/dns-proxmox-audit/
+sudo install -m 0755 lib/static-endpoints-export.py /usr/local/lib/dns-proxmox-audit/
 sudo install -d -m 0755 /etc/tmpfiles.d
 sudo install -m 0644 systemd/tmpfiles.d/dns-audit.conf /etc/tmpfiles.d/dns-audit.conf
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/dns-audit.conf
@@ -72,9 +78,15 @@ sudo /usr/local/lib/dns-proxmox-audit/dns-hourly-export.py --previous-hour
 
 **Time zone for filenames:** the script uses `datetime.now().astimezone().tzinfo` when `--timezone local` (default). For a named zone: `--timezone Europe/Berlin`.
 
+**Static APT + NTP host lists (manual, on the target, root):**
+
+```bash
+sudo /usr/local/lib/dns-proxmox-audit/static-endpoints-export.py
+```
+
 ## Part 2b — Controller: pull, merge, resolve (trusted)
 
-On the machine where you trust DNS (Ansible controller), copy or `rsync` `/var/lib/dns-audit/` from the journal host, then run [lib/dns-resolve-and-stage-for-pve.py](lib/dns-resolve-and-stage-for-pve.py):
+On the machine where you trust DNS (Ansible controller), use the pull-merge playbook (runs static export on the **target** first, then `rsync`) or `rsync` `/var/lib/dns-audit/` from the target yourself, then run [lib/dns-resolve-and-stage-for-pve.py](lib/dns-resolve-and-stage-for-pve.py):
 
 ```bash
 python3 lib/dns-resolve-and-stage-for-pve.py \
@@ -83,7 +95,7 @@ python3 lib/dns-resolve-and-stage-for-pve.py \
   --emit-pve --pve-staged ./pve-allowed-staged.txt
 ```
 
-Review `names-review.txt` (`name # last request: YYYYMMDDHH+0100`), then edit `pve-allowed-staged.txt` if needed (IP # name last request: …). Or use [ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) (see [INSTALL.md](INSTALL.md)).
+Review `names-review.txt` (`name # last request: YYYYMMDDHH+0100`), then edit `pve-allowed-staged.txt` if needed (IP # name last request: …). Also review pulled `apt-names.txt` / `ntp.txt` if you need those in the firewall. Or use [ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) with `-e dns_target_host=…` (see [INSTALL.md](INSTALL.md)).
 
 ## Part 3 — Proxmox guest firewall (run on a Proxmox node)
 
@@ -115,6 +127,7 @@ cat approved-lines.txt | sudo /usr/local/lib/dns-proxmox-audit/proxmox-update-al
 - `/etc/systemd/system/systemd-resolved.service.d/10-dns-audit.conf`
 - `/etc/systemd/journald.conf.d/90-dns-audit-limits.conf`
 - `/usr/local/lib/dns-proxmox-audit/dns-hourly-export.py`
+- `/usr/local/lib/dns-proxmox-audit/static-endpoints-export.py`
 - `/usr/local/lib/dns-proxmox-audit/proxmox-update-allowed-ips.py`
 - `/etc/systemd/system/dns-hourly-export.service`
 - `/etc/systemd/system/dns-hourly-export.timer`

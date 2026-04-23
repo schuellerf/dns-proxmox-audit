@@ -1,8 +1,8 @@
 ---
-# Journal audit target only: systemd-resolved debug, journald limits, hourly export (not Proxmox).
+# Target host: systemd-resolved + journald drop-ins, hourly DNS export, static APT/NTP export script (not Proxmox).
 # Run from the dns-proxmox-audit directory: ansible-playbook -i 'TARGET,' ansible/dns-audit.yml
 # Tags: resolved | export
-- name: Install DNS journal audit
+- name: Install DNS audit on target host
   hosts: all
   become: true
   vars:
@@ -46,6 +46,13 @@
         mode: "0755"
       tags: [export]
 
+    - name: Install audit_export_common.py
+      ansible.builtin.copy:
+        src: "{{ dns_audit_root }}/lib/audit_export_common.py"
+        dest: /usr/local/lib/dns-proxmox-audit/audit_export_common.py
+        mode: "0644"
+      tags: [export]
+
     - name: Install dns-hourly-export.py
       ansible.builtin.copy:
         src: "{{ dns_audit_root }}/lib/dns-hourly-export.py"
@@ -53,6 +60,13 @@
         mode: "0755"
       tags: [export]
       notify: apply_dns_audit
+
+    - name: Install static-endpoints-export.py
+      ansible.builtin.copy:
+        src: "{{ dns_audit_root }}/lib/static-endpoints-export.py"
+        dest: /usr/local/lib/dns-proxmox-audit/static-endpoints-export.py
+        mode: "0755"
+      tags: [export]
 
     - name: Ensure /etc/tmpfiles.d exists
       ansible.builtin.file:

@@ -4,7 +4,7 @@ This project intends to learn which DNS names a machine actually queries over ti
 
 **Three stages:**
 
-1. **Audit host (journal):** Log DNS activity and write **names-only** hourly files (FQDNs you observed—no “trust the answer IP from the log” on this machine).
+1. **Target host (audit):** Log DNS activity and write **names-only** hourly files (FQDNs you observed—no “trust the answer IP from the log” on this machine).
 2. **Controller (merge and resolve):** Copy those files to the machine you trust, merge “last seen” per name, **resolve names to A/AAAA on the controller**, review the result.
 3. **Proxmox (deploy):** Copy the reviewed staged file to the node, run the merge script into the guest firewall file, **reload the firewall** so the updated **outgoing-destination allowlist** (and related rules) takes effect.
 

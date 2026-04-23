@@ -13,9 +13,19 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+_LIB = Path(__file__).resolve().parent
+if str(_LIB) not in sys.path:
+    sys.path.insert(0, str(_LIB))
+from audit_export_common import (  # noqa: E402
+    current_hour_through_now_range,
+    filename_for_hour_start,
+    parse_iso_dt,
+    previous_hour_range,
+)
 
 OUT_SUFFIX = "dns-names.txt"
 
@@ -121,30 +131,6 @@ def _filter_substrings(
     return [ln for ln in lines if any(s in ln for s in substr)]
 
 
-def _previous_hour_range(tz: datetime.tzinfo) -> tuple[datetime, datetime]:
-    now = datetime.now(tz)
-    end = now.replace(minute=0, second=0, microsecond=0)
-    start = end - timedelta(hours=1)
-    return start, end
-
-
-def _current_hour_through_now_range(tz: datetime.tzinfo) -> tuple[datetime, datetime]:
-    """[start of current clock hour, now) — for ad-hoc runs that should include the ongoing hour."""
-    now = datetime.now(tz)
-    start = now.replace(minute=0, second=0, microsecond=0)
-    return start, now
-
-
-def _offset_in_filename(dt: datetime) -> str:
-    off = dt.strftime("%z")
-    return off if off else "+0000"
-
-
-def _filename_for_start_hour(start: datetime) -> str:
-    ymdh = start.strftime("%Y%m%d%H")
-    return f"{ymdh}{_offset_in_filename(start)}-{OUT_SUFFIX}"
-
-
 def run_export(
     output_dir: Path,
     start: datetime,
@@ -161,24 +147,13 @@ def run_export(
             out_lines.add(n)
     out_dir = output_dir
     out_dir.mkdir(parents=True, exist_ok=True)
-    name = _filename_for_start_hour(start)
+    name = filename_for_hour_start(start, OUT_SUFFIX)
     out_path = out_dir / name
     tmp = out_path.with_name(f".{out_path.name}.tmp")
     data = "\n".join(sorted(out_lines)) + ("\n" if out_lines else "")
     tmp.write_text(data, encoding="utf-8")
     os.replace(tmp, out_path)
     return out_path
-
-
-def _parse_dt(s: str, default_tz: datetime.tzinfo) -> datetime:
-    s0 = s.strip()
-    if s0.endswith("Z"):
-        d = datetime.fromisoformat(s0.replace("Z", "+00:00", 1))
-    else:
-        d = datetime.fromisoformat(s0)
-        if d.tzinfo is None:
-            d = d.replace(tzinfo=default_tz)
-    return d
 
 
 def main() -> None:
@@ -232,14 +207,14 @@ def main() -> None:
     if args.previous_hour and (args.since or args.until):
         ap.error("use --previous-hour without --since/--until")
     if args.since and args.until:
-        start = _parse_dt(args.since, tz)
-        end = _parse_dt(args.until, tz)
+        start = parse_iso_dt(args.since, tz)
+        end = parse_iso_dt(args.until, tz)
     elif args.since or args.until:
         ap.error("pass both --since and --until, or neither")
     elif args.previous_hour:
-        start, end = _previous_hour_range(tz)
+        start, end = previous_hour_range(tz)
     else:
-        start, end = _current_hour_through_now_range(tz)
+        start, end = current_hour_through_now_range(tz)
     sub = tuple(_DEFAULT_LINE_SUBSTR)
     if args.line_substr:
         sub = sub + tuple(args.line_substr)
