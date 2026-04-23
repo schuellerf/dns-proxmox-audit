@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Extract HTTP(S) apt mirror hostnames and NTP time peers from local config; write sorted lists.
+"""Extract HTTP(S) apt mirror hostnames and NTP time peers; write sorted lists.
 
-Intended to run on the target host (root) so /etc/apt and ntp config are read in place.
+Reads /etc/apt and NTP-related config files, then augments NTP peers from runtime when
+available: timedatectl show / timesync-status, systemd-analyze cat-config, and chronyc
+if chronyd is active. Intended to run on the target host (root).
 """
 
 from __future__ import annotations
@@ -9,6 +11,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
@@ -25,8 +28,118 @@ _RE_HTTPS_TOKEN = re.compile(r"\bhttps?://[^/\s#][^\s#]*", re.IGNORECASE)
 _RE_NTP_SVC = re.compile(r"^(?:server|pool)\s+(\S+)", re.IGNORECASE)
 
 _TIMESYNC_NTP = re.compile(r"^(NTP|FallbackNTP)\s*=\s*(.+)$", re.IGNORECASE)
+_RE_TIMESYNC_STATUS_SERVER = re.compile(r"^\s*Server:\s*(.+)$", re.MULTILINE)
+_RE_CHRONY_REF_HOST = re.compile(r"\(([^)]+)\)\s*$")
 
 _APT_DIRS = (Path("/etc/apt/sources.list"), Path("/etc/apt/sources.list.d"))
+
+
+def _add_ntp_peer(out: set[str], tok: str) -> None:
+    tok = tok.strip()
+    if not tok or tok.startswith("#"):
+        return
+    out.add(tok.lower() if re.match(r"^[a-z0-9._-]+$", tok, re.I) else tok)
+
+
+def _run_text(argv: list[str], timeout: float = 12.0) -> str | None:
+    try:
+        r = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print(f"ntp: skip {' '.join(argv[:2])}…: {e}", file=sys.stderr)
+        return None
+    if r.returncode != 0:
+        return None
+    return r.stdout
+
+
+def _merge_timedatectl_show(out: set[str]) -> None:
+    text = _run_text(["timedatectl", "show"])
+    if not text:
+        return
+    for line in text.splitlines():
+        line = line.strip()
+        if "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key, val = key.strip(), val.strip()
+        if key not in ("NTPServers", "FallbackNTP") or not val:
+            continue
+        for tok in val.split():
+            _add_ntp_peer(out, tok)
+
+
+def _merge_timedatectl_timesync_status(out: set[str]) -> None:
+    text = _run_text(["timedatectl", "timesync-status"])
+    if not text:
+        return
+    m = _RE_TIMESYNC_STATUS_SERVER.search(text)
+    if not m:
+        return
+    raw = m.group(1).strip()
+    if "(" in raw:
+        raw = raw.split("(", 1)[0].strip()
+    if raw:
+        _add_ntp_peer(out, raw)
+
+
+def _merge_systemd_analyze_timesyncd(out: set[str]) -> None:
+    text = _run_text(["systemd-analyze", "cat-config", "systemd/timesyncd.conf"])
+    if not text:
+        return
+    for line in text.splitlines():
+        line = line.split("#", 1)[0].strip()
+        m = _TIMESYNC_NTP.match(line)
+        if m:
+            for tok in m.group(2).split():
+                _add_ntp_peer(out, tok)
+
+
+def _chronyd_active() -> bool:
+    text = _run_text(["systemctl", "is-active", "chronyd"], timeout=5.0)
+    return bool(text and text.strip() == "active")
+
+
+def _merge_chronyc_sources(out: set[str]) -> None:
+    text = _run_text(["chronyc", "-n", "sources"])
+    if not text:
+        return
+    for line in text.splitlines():
+        s = line.strip()
+        if not s or s.startswith("=") or "Name/IP address" in s or s.startswith("MS "):
+            continue
+        if s.startswith("Number of sources"):
+            continue
+        parts = s.split()
+        if len(parts) < 2:
+            continue
+        # Column 0 = mode (^*, ^-, …); column 1 = Name/IP address
+        name = parts[1]
+        if name.startswith("#"):
+            continue
+        _add_ntp_peer(out, name)
+
+
+def _merge_chronyc_tracking(out: set[str]) -> None:
+    text = _run_text(["chronyc", "-n", "tracking"])
+    if not text:
+        return
+    for line in text.splitlines():
+        if "Reference ID" not in line:
+            continue
+        m = _RE_CHRONY_REF_HOST.search(line)
+        if m:
+            host = m.group(1).strip()
+            if host and not re.match(r"^[0-9a-fA-F.]+$", host):
+                _add_ntp_peer(out, host)
+        break
 
 
 def _netloc_from_http_url(url: str) -> str | None:
@@ -149,6 +262,12 @@ def collect_ntp_peers() -> set[str]:
     for p in (Path("/etc/chrony/chrony.conf"), Path("/etc/chrony.conf")):
         out |= _parse_chrony_or_ntp(p)
     out |= _parse_chrony_or_ntp(Path("/etc/ntp.conf"))
+    _merge_timedatectl_show(out)
+    _merge_timedatectl_timesync_status(out)
+    _merge_systemd_analyze_timesyncd(out)
+    if _chronyd_active():
+        _merge_chronyc_sources(out)
+        _merge_chronyc_tracking(out)
     return out
 
 

@@ -4,7 +4,7 @@
 
 **Tested on Ubuntu;** for outgoing TCP/UDP ports to allow toward mirrors, NTP, and DNS, see the **Outgoing access** section in [README.md](README.md).
 
-**Trust model:** the **target host** only writes **FQDNs** per hour (`*dns-names.txt` from the systemd-resolved **journal**). IPs for the firewall are **never** taken from journal answers. The pull/merge playbook **merges** those files on the target into **`names-review.txt`** and **`fetch`es** it into your repo as **`names-review.txt`** (with **`become`** so the audit dir stays `0750` root-only). After you **review** that file, the Proxmox playbook’s **`resolve`** step runs **`getaddrinfo` on the controller** and writes **`.pve-allowed-staged.txt`**; **`deploy`** copies it to the node and updates the guest firewall.
+**Trust model:** the **target host** only writes **FQDNs** per hour (`*dns-names.txt` from the systemd-resolved **journal**). IPs for the firewall are **never** taken from journal answers. The pull/merge playbook **merges** hourly names on the target into **`names-review.txt`**, refreshes **`apt-names.txt`** and **`ntp.txt`**, and **`fetch`es** all three into your repo (defaults: **`names-review.txt`**, **`apt-names.txt`**, **`ntp.txt`** under the repo root, each with **`become`** on the target so **`/var/lib/dns-audit`** can stay `0750` root-only). After you **review** that file, the Proxmox playbook’s **`resolve`** step runs **`getaddrinfo` on the controller** and writes **`.pve-allowed-staged.txt`**; **`deploy`** copies it to the node and updates the guest firewall.
 
 **Prerequisites:** `ansible-playbook`, SSH to the target host and (separately) to the PVE node.
 
@@ -18,7 +18,7 @@
 | [lib/dns_audit_names_lib.py](lib/dns_audit_names_lib.py) | `/usr/local/lib/dns-proxmox-audit/dns_audit_names_lib.py` |
 | [lib/dns-merge-hourly-names.py](lib/dns-merge-hourly-names.py) | `/usr/local/lib/dns-proxmox-audit/dns-merge-hourly-names.py` |
 | [lib/dns-hourly-export.py](lib/dns-hourly-export.py) | `/usr/local/lib/dns-proxmox-audit/dns-hourly-export.py` |
-| [lib/static-endpoints-export.py](lib/static-endpoints-export.py) | `/usr/local/lib/dns-proxmox-audit/static-endpoints-export.py` (APT + NTP host lists) |
+| [lib/static-endpoints-export.py](lib/static-endpoints-export.py) | `/usr/local/lib/dns-proxmox-audit/static-endpoints-export.py` (APT + NTP lists: `/etc`, **`timedatectl`**, **`systemd-analyze cat-config`**, **chronyc** if **chronyd** is active) |
 | [systemd/dns-hourly-export.service](systemd/dns-hourly-export.service), [systemd/dns-hourly-export.timer](systemd/dns-hourly-export.timer) | `/etc/systemd/system/` |
 | [systemd/tmpfiles.d/dns-audit.conf](systemd/tmpfiles.d/dns-audit.conf) | `/etc/tmpfiles.d/dns-audit.conf` |
 
@@ -28,7 +28,7 @@ The playbook also installs [lib/static-endpoints-export.py](lib/static-endpoints
 
 ### 2. Pull, merge, fetch — [ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml)
 
-Use **`-i your.target.example.com,`** and **`-e dns_target_host=…`** (must match the inventory host); optional **`-e ansible_user=...`**, **`-e ansible_ssh_private_key_file=...`**, `~/.ssh/config`. On the **target:** `static-endpoints-export.py` and **`dns-merge-hourly-names.py`** (under **`/usr/local/lib/dns-proxmox-audit/`**) with `sudo` **`-n`**. **`ansible.builtin.fetch`** (as root on the target) copies **`names-review.txt`** to the repo default **`names-review.txt`** (override with **`dns_audit_names_review`**).
+Use **`-i your.target.example.com,`** and **`-e dns_target_host=…`** (must match the inventory host); optional **`-e ansible_user=...`**, **`-e ansible_ssh_private_key_file=...`**, `~/.ssh/config`. On the **target:** `static-endpoints-export.py` and **`dns-merge-hourly-names.py`** (under **`/usr/local/lib/dns-proxmox-audit/`**) with `sudo` **`-n`**. **`ansible.builtin.fetch`** (as root on the target) copies **`names-review.txt`**, **`apt-names.txt`**, and **`ntp.txt`** to the repo defaults **`names-review.txt`**, **`apt-names.txt`**, **`ntp.txt`** (override with **`dns_audit_names_review`**, **`dns_audit_apt_names`**, **`dns_audit_ntp_list`**).
 
 Input dir on the target defaults to **`/var/lib/dns-audit`** (override with **`dns_audit_fetch_src`**). Merge reads hourly `*dns-names.txt` there and writes **`names-review.txt`** in that directory.
 

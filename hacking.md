@@ -48,7 +48,7 @@ If the unit fails (unknown `LogFilterPatterns=` on older systemd): install [10-d
 
 **Filename pattern:** e.g. `2026032914+0100-dns-names.txt`: wall-clock **start** of the hour, then `strftime("%z")` (no separator before the offset), as in [audit_export_common.filename_for_hour_start](lib/audit_export_common.py). Each file lists **one FQDN per line** (no IPs; used for names-seen-only audit).
 
-**Static lists (not hourly):** `apt-names.txt` and `ntp.txt` in the same directory — **HTTP(S) mirror hostnames** from `/etc/apt` and **NTP/chrony/timesyncd** peers (including `/etc/systemd/timesyncd.conf` and **`/etc/systemd/timesyncd.conf.d/*.conf`**). Regenerated when you run [ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) (static step on the target) or manually below. NTP from DHCP is not read; edge Deb822 or mirror URL formats may need manual checks.
+**Static lists (not hourly):** `apt-names.txt` and `ntp.txt` in the same directory — **HTTP(S) mirror hostnames** from `/etc/apt` and **NTP peers** from config files (**timesyncd**, chrony, **ntp.conf**), plus **`timedatectl show`** / **`timedatectl timesync-status`** (current **`Server:`**), **`systemd-analyze cat-config systemd/timesyncd.conf`**, and **`chronyc`** if **`chronyd`** is active. Regenerated when you run [ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) (static step on the target) or manually below. NTP from DHCP-only setups may still be missing; edge Deb822 or mirror URL formats may need manual checks.
 
 **Commands:**
 
@@ -90,7 +90,7 @@ sudo /usr/local/lib/dns-proxmox-audit/static-endpoints-export.py
 
 ## Part 2b — Pull, merge, fetch
 
-[ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) runs **`dns-merge-hourly-names.py`** on the **target**, then **`fetch`es** **`names-review.txt`** into the repo as **`names-review.txt`** (fetch uses **`become`** because **`/var/lib/dns-audit`** is **`0750`**). Re-run [ansible/dns-audit.yml](ansible/dns-audit.yml) on the target after pulling new `lib/` files.
+[ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) runs **`dns-merge-hourly-names.py`** on the **target**, then **`fetch`es** **`names-review.txt`**, **`apt-names.txt`**, and **`ntp.txt`** into the repo (same basenames by default; fetch uses **`become`** because **`/var/lib/dns-audit`** is **`0750`**). Re-run [ansible/dns-audit.yml](ansible/dns-audit.yml) on the target after pulling new `lib/` files.
 
 **Manual on the target** (merge hourly files under the audit dir):
 

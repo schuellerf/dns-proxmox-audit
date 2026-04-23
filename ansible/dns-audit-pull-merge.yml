@@ -3,7 +3,8 @@
 # Step 3 (resolve + deploy): ansible/proxmox-update-allowed-ips.yml --tags resolve,deploy
 # -e dns_target_host=…
 # -e dns_audit_fetch_src=…  audit directory on target (default /var/lib/dns-audit)
-# -e dns_audit_names_review=…  local path for fetch (default repo /names-review.txt)
+# -e dns_audit_names_review=…  local path for names-review fetch (default repo /names-review.txt)
+# -e dns_audit_apt_names=…  -e dns_audit_ntp_list=…  local paths for apt-names.txt / ntp.txt
 # -e ansible_ssh_private_key_file=…  -e dns_audit_ssh_common_args=…
 - name: Pull dns names and merge
   hosts: "{{ dns_target_host | default('localhost') }}"
@@ -53,3 +54,18 @@
       vars:
         _dns_a_dir: "{{ (dns_audit_fetch_src | default('/var/lib/dns-audit', true)) | regex_replace('/+$', '') }}"
         _t_names: "{{ _dns_a_dir }}/names-review.txt"
+
+    - name: Fetch apt-names and ntp lists to controller
+      ansible.builtin.fetch:
+        src: "{{ _dns_a_dir }}/{{ item.src }}"
+        dest: "{{ item.dest }}"
+        flat: true
+      become: true
+      become_flags: -n
+      loop:
+        - src: apt-names.txt
+          dest: "{{ dns_audit_apt_names | default(dns_audit_root + '/apt-names.txt', true) }}"
+        - src: ntp.txt
+          dest: "{{ dns_audit_ntp_list | default(dns_audit_root + '/ntp.txt', true) }}"
+      vars:
+        _dns_a_dir: "{{ (dns_audit_fetch_src | default('/var/lib/dns-audit', true)) | regex_replace('/+$', '') }}"

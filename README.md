@@ -7,7 +7,7 @@ This project intends to learn which DNS names a machine actually queries over ti
 **Three steps:**
 
 1. **Target host (audit):** Log DNS activity and write **names-only** hourly files (FQDNs you observed—no “trust the answer IP from the log” on this machine).
-2. **Pull / merge / fetch:** On the audit host, merge hourly files into **`names-review.txt`** and **`fetch`** that file into the repo as **`names-review.txt`** (repo root). **Edit it** after review.
+2. **Pull / merge / fetch:** On the audit host, merge hourly files into **`names-review.txt`**, refresh **`apt-names.txt`** / **`ntp.txt`**, and **`fetch`** all three into the repo root. **Edit `names-review.txt`** after review.
 3. **Resolve and Proxmox:** On the **controller**, run **`getaddrinfo`** to build **`.pve-allowed-staged.txt`**, then copy it to the node and merge into the guest firewall (**`resolve`** + **`deploy`** tags).
 
 ## Ansible quick start (three playbooks)
@@ -26,7 +26,7 @@ cd /path/to/dns-proxmox-audit
 ansible-playbook -i "$TARGET_HOST," -b -K ansible/dns-audit.yml
 ```
 
-**2. Pull and merge** — on the target: static export + merge hourly names; **fetch** **`names-review.txt`** into the repo (review and edit it before step 3):
+**2. Pull and merge** — on the target: static export + merge hourly names; **fetch** **`names-review.txt`**, **`apt-names.txt`**, and **`ntp.txt`** into the repo (review **`names-review.txt`** before step 3):
 
 ```bash
 ansible-playbook -i "$TARGET_HOST," -b -K ansible/dns-audit-pull-merge.yml -e dns_target_host="$TARGET_HOST"
