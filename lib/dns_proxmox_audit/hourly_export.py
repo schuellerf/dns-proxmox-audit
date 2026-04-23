@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Export systemd-resolved journal lines for a time range: FQDNs only (no IPs; trust merge on a controller).
 
 Default (no time flags): start of the current clock hour through now — for interactive runs.
@@ -17,16 +16,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-_LIB = Path(__file__).resolve().parent
-if str(_LIB) not in sys.path:
-    sys.path.insert(0, str(_LIB))
-from audit_export_common import (  # noqa: E402
+from .audit_export_common import (
     current_hour_through_now_range,
     filename_for_hour_start,
     parse_iso_dt,
     previous_hour_range,
 )
-from dns_audit_names_lib import is_allowlist_relevant_name  # noqa: E402
+from .names import is_allowlist_relevant_name
 
 OUT_SUFFIX = "dns-names.txt"
 

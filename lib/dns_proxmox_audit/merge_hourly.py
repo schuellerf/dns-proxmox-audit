@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Merge hourly *dns-names.txt under the audit directory into names-review.txt."""
 
 from __future__ import annotations
@@ -7,11 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-_LIB = Path(__file__).resolve().parent
-if str(_LIB) not in sys.path:
-    sys.path.insert(0, str(_LIB))
-
-from dns_audit_names_lib import load_hourly, write_names_review  # noqa: E402
+from .names import load_hourly, write_names_review
 
 
 def main() -> int:

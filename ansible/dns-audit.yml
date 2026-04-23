@@ -39,48 +39,19 @@
       tags: [resolved]
       notify: apply_dns_audit
 
-    - name: Ensure /usr/local/lib/dns-proxmox-audit exists
+    - name: Ensure /usr/local/lib/dns_proxmox_audit parent exists
       ansible.builtin.file:
-        path: /usr/local/lib/dns-proxmox-audit
+        path: /usr/local/lib
         state: directory
         mode: "0755"
       tags: [export]
 
-    - name: Install audit_export_common.py
+    - name: Install Python package dns_proxmox_audit
       ansible.builtin.copy:
-        src: "{{ dns_audit_root }}/lib/audit_export_common.py"
-        dest: /usr/local/lib/dns-proxmox-audit/audit_export_common.py
-        mode: "0644"
-      tags: [export]
-
-    - name: Install dns-hourly-export.py
-      ansible.builtin.copy:
-        src: "{{ dns_audit_root }}/lib/dns-hourly-export.py"
-        dest: /usr/local/lib/dns-proxmox-audit/dns-hourly-export.py
-        mode: "0755"
+        src: "{{ dns_audit_root }}/lib/dns_proxmox_audit"
+        dest: /usr/local/lib
       tags: [export]
       notify: apply_dns_audit
-
-    - name: Install static-endpoints-export.py
-      ansible.builtin.copy:
-        src: "{{ dns_audit_root }}/lib/static-endpoints-export.py"
-        dest: /usr/local/lib/dns-proxmox-audit/static-endpoints-export.py
-        mode: "0755"
-      tags: [export]
-
-    - name: Install dns_audit_names_lib.py
-      ansible.builtin.copy:
-        src: "{{ dns_audit_root }}/lib/dns_audit_names_lib.py"
-        dest: /usr/local/lib/dns-proxmox-audit/dns_audit_names_lib.py
-        mode: "0644"
-      tags: [export]
-
-    - name: Install dns-merge-hourly-names.py
-      ansible.builtin.copy:
-        src: "{{ dns_audit_root }}/lib/dns-merge-hourly-names.py"
-        dest: /usr/local/lib/dns-proxmox-audit/dns-merge-hourly-names.py
-        mode: "0755"
-      tags: [export]
 
     - name: Ensure /etc/tmpfiles.d exists
       ansible.builtin.file:

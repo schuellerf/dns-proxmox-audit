@@ -1,4 +1,5 @@
 __pycache__
+*.egg-info
 names-review.txt
 apt-names.txt
 ntp.txt

@@ -60,10 +60,12 @@
         argv: "{{ _resolve_argv }}"
       args:
         chdir: "{{ dns_audit_root }}"
+      environment:
+        PYTHONPATH: "{{ dns_audit_root }}/lib"
       changed_when: true
       vars:
         _py: "{{ ansible_python_interpreter | default('/usr/bin/python3') }}"
-        _resolve_argv: "{{ [_py, dns_audit_root + '/lib/dns-resolve-names-for-pve.py', '--apt-names', dns_audit_apt_names, '--ntp-names', dns_audit_ntp_names, '--names-review', dns_audit_names_review, '--apt-staged', dns_audit_pve_staged_apt, '--ntp-staged', dns_audit_pve_staged_ntp, '--pve-staged', dns_audit_pve_staged_reviewed, '--dns-ips', dns_audit_dns_ips, '--dns-ips-staged', dns_audit_pve_staged_dns] + (['--ipv4-only'] if (dns_resolve_ipv4_only | default(false) | bool) else []) }}"
+        _resolve_argv: "{{ [_py, '-m', 'dns_proxmox_audit.resolve_for_pve', '--apt-names', dns_audit_apt_names, '--ntp-names', dns_audit_ntp_names, '--names-review', dns_audit_names_review, '--apt-staged', dns_audit_pve_staged_apt, '--ntp-staged', dns_audit_pve_staged_ntp, '--pve-staged', dns_audit_pve_staged_reviewed, '--dns-ips', dns_audit_dns_ips, '--dns-ips-staged', dns_audit_pve_staged_dns] + (['--ipv4-only'] if (dns_resolve_ipv4_only | default(false) | bool) else []) }}"
 
     - name: Local merge (dry-run) into .pve-fw-merged file
       ansible.builtin.command:
@@ -72,9 +74,11 @@
       changed_when: true
       args:
         chdir: "{{ dns_audit_root }}"
+      environment:
+        PYTHONPATH: "{{ dns_audit_root }}/lib"
       vars:
         _py: "{{ ansible_python_interpreter | default('/usr/bin/python3') }}"
-        _merge_dryrun_argv: "{{ [_py, dns_audit_root + '/lib/proxmox-update-allowed-ips.py', '--firewall', dns_audit_pve_fetched, '--dry-run', '--managed-ipset', ('apt-names:' + dns_audit_pve_staged_apt), '--managed-ipset', ('ntp-names:' + dns_audit_pve_staged_ntp), '--managed-ipset', ('reviewed-names:' + dns_audit_pve_staged_reviewed), '--managed-ipset', ('dns-ips:' + dns_audit_pve_staged_dns)] }}"
+        _merge_dryrun_argv: "{{ [_py, '-m', 'dns_proxmox_audit.proxmox_update_allowed_ips', '--firewall', dns_audit_pve_fetched, '--dry-run', '--managed-ipset', ('apt-names:' + dns_audit_pve_staged_apt), '--managed-ipset', ('ntp-names:' + dns_audit_pve_staged_ntp), '--managed-ipset', ('reviewed-names:' + dns_audit_pve_staged_reviewed), '--managed-ipset', ('dns-ips:' + dns_audit_pve_staged_dns)] }}"
 
     - name: Write merged .fw for review and deploy
       ansible.builtin.copy:

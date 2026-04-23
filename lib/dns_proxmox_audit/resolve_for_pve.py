@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Resolve hostname lists to IPs, stage dns-ips (no GAI), write staged files for PVE merge (controller)."""
 
 from __future__ import annotations
@@ -7,11 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-_LIB = Path(__file__).resolve().parent
-if str(_LIB) not in sys.path:
-    sys.path.insert(0, str(_LIB))
-
-from dns_audit_names_lib import (  # noqa: E402
+from .names import (
     load_names_review,
     load_plain_hostnames,
     write_pve_staged,

@@ -35,30 +35,22 @@ If the unit fails (unknown `LogFilterPatterns=` on older systemd): install [10-d
 
 | Repository file | Install to |
 | --- | --- |
-| [lib/audit_export_common.py](lib/audit_export_common.py) | `/usr/local/lib/dns-proxmox-audit/audit_export_common.py` (mode `0644`) |
-| [lib/dns_audit_names_lib.py](lib/dns_audit_names_lib.py) | `/usr/local/lib/dns-proxmox-audit/dns_audit_names_lib.py` (mode `0644`) |
-| [lib/dns-merge-hourly-names.py](lib/dns-merge-hourly-names.py) | `/usr/local/lib/dns-proxmox-audit/dns-merge-hourly-names.py` (mode `0755`) |
-| [lib/dns-hourly-export.py](lib/dns-hourly-export.py) | `/usr/local/lib/dns-proxmox-audit/dns-hourly-export.py` (mode `0755`) |
-| [lib/static-endpoints-export.py](lib/static-endpoints-export.py) | `/usr/local/lib/dns-proxmox-audit/static-endpoints-export.py` (mode `0755`) |
+| [lib/dns_proxmox_audit/](lib/dns_proxmox_audit/) (entire package directory) | `/usr/local/lib/dns_proxmox_audit/` (same layout; e.g. `…/dns_proxmox_audit/hourly_export.py` — run as `python3 -m dns_proxmox_audit.…` with `PYTHONPATH=/usr/local/lib`) |
 | [systemd/dns-hourly-export.service](systemd/dns-hourly-export.service) | `/etc/systemd/system/dns-hourly-export.service` |
 | [systemd/dns-hourly-export.timer](systemd/dns-hourly-export.timer) | `/etc/systemd/system/dns-hourly-export.timer` |
 | [systemd/tmpfiles.d/dns-audit.conf](systemd/tmpfiles.d/dns-audit.conf) | `/etc/tmpfiles.d/dns-audit.conf` (or `/usr/lib/tmpfiles.d/dns-audit.conf`) |
 
 **Output directory (hourly files):** `/var/lib/dns-audit/`
 
-**Filename pattern:** e.g. `2026032914+0100-dns-names.txt`: wall-clock **start** of the hour, then `strftime("%z")` (no separator before the offset), as in [audit_export_common.filename_for_hour_start](lib/audit_export_common.py). Each file lists **one FQDN per line** (no IPs; used for names-seen-only audit).
+**Filename pattern:** e.g. `2026032914+0100-dns-names.txt`: wall-clock **start** of the hour, then `strftime("%z")` (no separator before the offset), as in [audit_export_common.filename_for_hour_start](lib/dns_proxmox_audit/audit_export_common.py). Each file lists **one FQDN per line** (no IPs; used for names-seen-only audit).
 
 **Static lists (not hourly):** `apt-names.txt`, `ntp.txt`, and `dns-ips.txt` in the same directory. **`apt-names.txt`:** **HTTP(S) mirror hostnames** from `/etc/apt`. **`ntp.txt`:** **NTP peers** from config files (**timesyncd**, chrony, **ntp.conf**), plus **`timedatectl show`** / **`timedatectl timesync-status`** (current **`Server:`**), **`systemd-analyze cat-config systemd/timesyncd.conf`**, and **`chronyc`** if **`chronyd`** is active. **`ntp.txt` lists FQDN-style names only** (at least one dot, not an IP literal); IP-only endpoints are skipped. **`dns-ips.txt`:** current **DNS resolver** addresses on the target (**`resolvectl`**, with resolv fallbacks); **loopback** and **stub** addresses are omitted. Regenerated when you run [ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) (static step on the target) or manually below. NTP from DHCP-only setups may still be missing; edge Deb822 or mirror URL formats may need manual checks.
 
 **Commands:**
 
 ```bash
-sudo install -d -m 0755 /usr/local/lib/dns-proxmox-audit
-sudo install -m 0644 lib/audit_export_common.py /usr/local/lib/dns-proxmox-audit/
-sudo install -m 0644 lib/dns_audit_names_lib.py /usr/local/lib/dns-proxmox-audit/
-sudo install -m 0755 lib/dns-merge-hourly-names.py /usr/local/lib/dns-proxmox-audit/
-sudo install -m 0755 lib/dns-hourly-export.py /usr/local/lib/dns-proxmox-audit/
-sudo install -m 0755 lib/static-endpoints-export.py /usr/local/lib/dns-proxmox-audit/
+sudo install -d -m 0755 /usr/local/lib/dns_proxmox_audit
+sudo cp -a lib/dns_proxmox_audit/. /usr/local/lib/dns_proxmox_audit/
 sudo install -d -m 0755 /etc/tmpfiles.d
 sudo install -m 0644 systemd/tmpfiles.d/dns-audit.conf /etc/tmpfiles.d/dns-audit.conf
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/dns-audit.conf
@@ -71,13 +63,13 @@ sudo systemctl enable --now dns-hourly-export.timer
 **Manual run (this clock hour so far,** start of the hour through now — default for ad-hoc use):
 
 ```bash
-sudo /usr/local/lib/dns-proxmox-audit/dns-hourly-export.py
+sudo env PYTHONPATH=/usr/local/lib python3 -m dns_proxmox_audit.hourly_export
 ```
 
 **Last completed local hour** (same as the timer service):
 
 ```bash
-sudo /usr/local/lib/dns-proxmox-audit/dns-hourly-export.py --previous-hour
+sudo env PYTHONPATH=/usr/local/lib python3 -m dns_proxmox_audit.hourly_export --previous-hour
 ```
 
 **Time zone for filenames:** the script uses `datetime.now().astimezone().tzinfo` when `--timezone local` (default). For a named zone: `--timezone Europe/Berlin`.
@@ -85,25 +77,27 @@ sudo /usr/local/lib/dns-proxmox-audit/dns-hourly-export.py --previous-hour
 **Static APT + NTP host lists (manual, on the target, root):**
 
 ```bash
-sudo /usr/local/lib/dns-proxmox-audit/static-endpoints-export.py
+sudo env PYTHONPATH=/usr/local/lib python3 -m dns_proxmox_audit.static_endpoints
 ```
 
 ## Part 2b — Pull, merge, fetch
 
-[ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) runs **`dns-merge-hourly-names.py`** on the **target**, then **`fetch`es** **`names-review.txt`**, **`apt-names.txt`**, **`ntp.txt`**, and **`dns-ips.txt`** into the repo (same basenames by default; fetch uses **`become`** because **`/var/lib/dns-audit`** is **`0750`**). Re-run [ansible/dns-audit.yml](ansible/dns-audit.yml) on the target after pulling new `lib/` files.
+[ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) runs **`python3 -m dns_proxmox_audit.merge_hourly`** on the **target**, then **`fetch`es** **`names-review.txt`**, **`apt-names.txt`**, **`ntp.txt`**, and **`dns-ips.txt`** into the repo (same basenames by default; fetch uses **`become`** because **`/var/lib/dns-audit`** is **`0750`**). Re-run [ansible/dns-audit.yml](ansible/dns-audit.yml) on the target after pulling new `lib/dns_proxmox_audit/` files.
 
 **Manual on the target** (merge hourly files under the audit dir):
 
 ```bash
-sudo /usr/local/lib/dns-proxmox-audit/dns-merge-hourly-names.py
+sudo env PYTHONPATH=/usr/local/lib python3 -m dns_proxmox_audit.merge_hourly
 ```
 
 **Manual on the controller** (after review; from repo root — resolves **`apt-names.txt`**, **`ntp.txt`**, **`names-review.txt`** into **`.pve-apt-names-staged.txt`**, **`.pve-ntp-names-staged.txt`**, **`.pve-allowed-staged.txt`**, and stages **`dns-ips.txt`** to **`.pve-dns-ips-staged.txt`** without **getaddrinfo**; a missing input file produces an empty staged file for that channel):
 
 ```bash
-python3 lib/dns-resolve-names-for-pve.py
-# or: python3 lib/dns-resolve-names-for-pve.py --ipv4-only
+env PYTHONPATH=lib python3 -m dns_proxmox_audit.resolve_for_pve
+# or: env PYTHONPATH=lib python3 -m dns_proxmox_audit.resolve_for_pve --ipv4-only
 ```
+
+After `pip install -e .` (see [pyproject.toml](pyproject.toml)), you can omit `PYTHONPATH=lib`.
 
 Review **`names-review.txt`** (`name # last request: YYYYMMDDHH+0100`), then run the resolver (or [ansible/proxmox-update-allowed-ips.yml](ansible/proxmox-update-allowed-ips.yml) **`--tags resolve`**). Edit the staged files if needed. For APT/NTP hostnames, use **`apt-names.txt`** / **`ntp.txt`** from the target (static export) or re-run the static export. **`dns-ips.txt`** is IP literals from the target; optional **`+guest/dns-ips`** in **`[RULES]`** for DNS egress. The merge step updates **only** **`[IPSET apt-names]`**, **`[IPSET ntp-names]`**, **`[IPSET reviewed-names]`**, and **`[IPSET dns-ips]`** in the guest **`.fw`**; add **`+guest/apt-names`**, **`+guest/ntp-names`**, **`+guest/reviewed-names`**, **`+guest/dns-ips`** in **`[RULES]`** yourself if you want those sets enforced. See [INSTALL.md](INSTALL.md) and `-e dns_target_host=…` with `-i …,`.
 
@@ -113,13 +107,13 @@ Copy the script to the node as in the table below if you want to run it on the n
 
 | Repository file | Install to (example) |
 | --- | --- |
-| [lib/proxmox-update-allowed-ips.py](lib/proxmox-update-allowed-ips.py) | `/usr/local/lib/dns-proxmox-audit/proxmox-update-allowed-ips.py` (mode `0755`) |
+| [lib/dns_proxmox_audit/proxmox_update_allowed_ips.py](lib/dns_proxmox_audit/proxmox_update_allowed_ips.py) (same as full package) | Copy [lib/dns_proxmox_audit](lib/dns_proxmox_audit) to `/usr/local/lib/dns_proxmox_audit/`, then `sudo env PYTHONPATH=/usr/local/lib python3 -m dns_proxmox_audit.proxmox_update_allowed_ips` |
 | Guest rules | `/etc/pve/firewall/<VMID>.fw` (pass to `--firewall`) |
 
 **Dry run (managed IPSETs — same model as the Ansible resolve step):**
 
 ```bash
-python3 lib/proxmox-update-allowed-ips.py --firewall /path/to/.pve-fw.fetched.100.fw --dry-run \
+env PYTHONPATH=lib python3 -m dns_proxmox_audit.proxmox_update_allowed_ips --firewall /path/to/.pve-fw.fetched.100.fw --dry-run \
   --managed-ipset apt-names:.pve-apt-names-staged.txt \
   --managed-ipset ntp-names:.pve-ntp-names-staged.txt \
   --managed-ipset reviewed-names:.pve-allowed-staged.txt \
@@ -129,14 +123,14 @@ python3 lib/proxmox-update-allowed-ips.py --firewall /path/to/.pve-fw.fetched.10
 **Dry run / apply (legacy: single `[IPSET <name>]`, default `allowed-ips`):**
 
 ```bash
-cat approved-lines.txt | sudo /usr/local/lib/dns-proxmox-audit/proxmox-update-allowed-ips.py \
+cat approved-lines.txt | sudo env PYTHONPATH=/usr/local/lib python3 -m dns_proxmox_audit.proxmox_update_allowed_ips \
   --firewall /etc/pve/firewall/100.fw --dry-run
 ```
 
 **Apply legacy merge (adds new IPs, keeps existing; optional `--sort`):**
 
 ```bash
-cat approved-lines.txt | sudo /usr/local/lib/dns-proxmox-audit/proxmox-update-allowed-ips.py \
+cat approved-lines.txt | sudo env PYTHONPATH=/usr/local/lib python3 -m dns_proxmox_audit.proxmox_update_allowed_ips \
   --firewall /etc/pve/firewall/100.fw --input -
 ```
 
@@ -146,10 +140,7 @@ cat approved-lines.txt | sudo /usr/local/lib/dns-proxmox-audit/proxmox-update-al
 
 - `/etc/systemd/system/systemd-resolved.service.d/10-dns-audit.conf`
 - `/etc/systemd/journald.conf.d/90-dns-audit-limits.conf`
-- `/usr/local/lib/dns-proxmox-audit/dns-merge-hourly-names.py`
-- `/usr/local/lib/dns-proxmox-audit/dns-hourly-export.py`
-- `/usr/local/lib/dns-proxmox-audit/static-endpoints-export.py`
-- `/usr/local/lib/dns-proxmox-audit/proxmox-update-allowed-ips.py`
+- `/usr/local/lib/dns_proxmox_audit/` (Python package: run with `PYTHONPATH=/usr/local/lib` and `python3 -m dns_proxmox_audit.…`)
 - `/etc/systemd/system/dns-hourly-export.service`
 - `/etc/systemd/system/dns-hourly-export.timer`
 - `/etc/tmpfiles.d/dns-audit.conf`

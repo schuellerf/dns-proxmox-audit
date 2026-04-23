@@ -7,7 +7,8 @@ After=systemd-resolved.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/lib/dns-proxmox-audit/dns-hourly-export.py --previous-hour
+Environment=PYTHONPATH=/usr/local/lib
+ExecStart=/usr/bin/python3 -m dns_proxmox_audit.hourly_export --previous-hour
 # Need journal read for any host user:
 #   User=root
 User=root

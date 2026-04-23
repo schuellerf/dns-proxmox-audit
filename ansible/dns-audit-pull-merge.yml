@@ -25,9 +25,13 @@
     - name: Refresh static APT and NTP host lists on target host
       ansible.builtin.command:
         argv:
-          - /usr/local/lib/dns-proxmox-audit/static-endpoints-export.py
+          - /usr/bin/python3
+          - -m
+          - dns_proxmox_audit.static_endpoints
           - --output-dir
           - "{{ dns_audit_fetch_src | default('/var/lib/dns-audit', true) }}"
+      environment:
+        PYTHONPATH: /usr/local/lib
       become: true
       become_flags: -n
       changed_when: true
@@ -35,9 +39,13 @@
     - name: Merge hourly DNS names on target into names-review.txt
       ansible.builtin.command:
         argv:
-          - /usr/local/lib/dns-proxmox-audit/dns-merge-hourly-names.py
+          - /usr/bin/python3
+          - -m
+          - dns_proxmox_audit.merge_hourly
           - --output-dir
           - "{{ _dns_a_dir }}"
+      environment:
+        PYTHONPATH: /usr/local/lib
       become: true
       become_flags: -n
       changed_when: true
