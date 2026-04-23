@@ -82,7 +82,7 @@ sudo env PYTHONPATH=/usr/local/lib python3 -m dns_proxmox_audit.static_endpoints
 
 ## Part 2b — Pull, merge, fetch
 
-[ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) runs **`python3 -m dns_proxmox_audit.merge_hourly`** on the **target**, then **`fetch`es** **`names-review.txt`**, **`apt-names.txt`**, **`ntp.txt`**, and **`dns-ips.txt`** into the repo (same basenames by default; fetch uses **`become`** because **`/var/lib/dns-audit`** is **`0750`**). Re-run [ansible/dns-audit.yml](ansible/dns-audit.yml) on the target after pulling new `lib/dns_proxmox_audit/` files.
+[ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) on the **target** runs **`static_endpoints`**, then **`hourly_export`** (default: current partial hour through now—use **`-e dns_pull_merge_hourly_export_mode=previous`** for `--previous-hour` only), then **`merge_hourly`**, then **`fetch`es** **`names-review.txt`**, **`apt-names.txt`**, **`ntp.txt`**, and **`dns-ips.txt`** into the repo (same basenames by default; fetch uses **`become`** because **`/var/lib/dns-audit`** is **`0750`**). Re-run [ansible/dns-audit.yml](ansible/dns-audit.yml) on the target after pulling new `lib/dns_proxmox_audit/` files.
 
 **Manual on the target** (merge hourly files under the audit dir):
 

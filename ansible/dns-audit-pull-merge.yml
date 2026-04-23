@@ -1,10 +1,12 @@
 ---
-# Target: static APT/NTP export, merge hourly DNS names → names-review.txt; controller: fetch for manual review.
+# Target: static APT/NTP export, journal DNS export, merge hourly DNS names → names-review.txt; controller: fetch for manual review.
+# Before merge, runs hourly_export on the target so names-review includes fresh journal data (default: current partial hour through now).
 # Step 3 (Proxmox): ansible/proxmox-update-allowed-ips.yml --tags resolve then --tags deploy (see README)
 # -e dns_target_host=…
 # -e dns_audit_fetch_src=…  audit directory on target (default /var/lib/dns-audit)
 # -e dns_audit_names_review=…  local path for names-review fetch (default repo /names-review.txt)
 # -e dns_audit_apt_names=…  -e dns_audit_ntp_list=…  -e dns_audit_dns_ips=…  local paths for static exports
+# -e dns_pull_merge_hourly_export_mode=current|previous  default current (previous = only last full local hour, like the timer)
 # -e ansible_ssh_private_key_file=…  -e dns_audit_ssh_common_args=…
 - name: Pull dns names and merge
   hosts: "{{ dns_target_host | default('localhost') }}"
@@ -35,6 +37,17 @@
       become: true
       become_flags: -n
       changed_when: true
+
+    - name: Export journal DNS names from systemd-resolved (before merge)
+      ansible.builtin.command:
+        argv: "{{ ['/usr/bin/python3', '-m', 'dns_proxmox_audit.hourly_export', '--output-dir', _dns_a_dir] + (['--previous-hour'] if (dns_pull_merge_hourly_export_mode | default('current') | string == 'previous') else []) }}"
+      environment:
+        PYTHONPATH: /usr/local/lib
+      become: true
+      become_flags: -n
+      changed_when: true
+      vars:
+        _dns_a_dir: "{{ (dns_audit_fetch_src | default('/var/lib/dns-audit', true)) | regex_replace('/+$', '') }}"
 
     - name: Merge hourly DNS names on target into names-review.txt
       ansible.builtin.command:
