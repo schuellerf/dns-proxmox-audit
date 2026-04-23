@@ -1,8 +1,7 @@
 ---
 # Step 3: fetch guest .fw from PVE, resolve names on the controller, merge locally, then
 # deploy: upload merged .fw, pve-firewall compile, reload.
-# Typical: --tags install (optional) — copy helper for manual on-node use (hacking.md)
-#   ansible-playbook -i 'PVE,' -b -K --tags install ansible/proxmox-update-allowed-ips.yml
+# Typical:
 #   ansible-playbook -i 'PVE,' -b -K -e pve_vmid=100 --tags resolve ansible/proxmox-update-allowed-ips.yml
 #   ansible-playbook -i 'PVE,' -b -K -e pve_vmid=100 --tags deploy ansible/proxmox-update-allowed-ips.yml
 # -e pve_vmid=… — guest VM id; firewall path = /etc/pve/firewall/<id>.fw (default pve_vmid: 100)
@@ -74,27 +73,6 @@
         content: "{{ _merged_fw_content.stdout }}"
         dest: "{{ dns_audit_pve_merged_fw }}"
         mode: "0600"
-
-- name: Install proxmox-update-allowed-ips on node
-  hosts: all
-  become: true
-  gather_facts: false
-  tags: [install]
-  vars:
-    dns_audit_root: "{{ playbook_dir | dirname }}"
-
-  tasks:
-    - name: Ensure /usr/local/lib/dns-proxmox-audit exists
-      ansible.builtin.file:
-        path: /usr/local/lib/dns-proxmox-audit
-        state: directory
-        mode: "0755"
-
-    - name: Install proxmox-update-allowed-ips.py
-      ansible.builtin.copy:
-        src: "{{ dns_audit_root }}/lib/proxmox-update-allowed-ips.py"
-        dest: /usr/local/lib/dns-proxmox-audit/proxmox-update-allowed-ips.py
-        mode: "0755"
 
 - name: Upload merged .fw, compile, reload
   hosts: all

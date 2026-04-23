@@ -109,7 +109,7 @@ Review **`names-review.txt`** (`name # last request: YYYYMMDDHH+0100`), then run
 
 ## Part 3 — Proxmox guest firewall (run on a Proxmox node)
 
-Install the helper with [ansible/proxmox-update-allowed-ips.yml](ansible/proxmox-update-allowed-ips.yml) **`--tags install`**, or copy the script as below. The playbook’s normal flow is **`--tags resolve`** (fetch guest **`.fw`**, resolve names, merge on the **controller** into **`.pve-fw-merged.<vmid>.fw`**) then **`--tags deploy`** (upload that file, `pve-firewall compile`, `systemctl reload pve-firewall`). Override merged output with **`-e dns_audit_pve_merged_fw=...`**. **`install`** is optional unless you want to pipe into the script on the node as below; reload after **deploy** ignores failure if the unit does not support reload.
+Copy the script to the node as in the table below if you want to pipe into it on the node. The playbook’s flow is **`--tags resolve`** (fetch guest **`.fw`**, resolve names, merge on the **controller** into **`.pve-fw-merged.<vmid>.fw`**) then **`--tags deploy`** (upload that file, `pve-firewall compile`, `systemctl reload pve-firewall`). Override merged output with **`-e dns_audit_pve_merged_fw=...`**. Reload after **deploy** ignores failure if the unit does not support reload.
 
 | Repository file | Install to (example) |
 | --- | --- |

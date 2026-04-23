@@ -32,11 +32,9 @@ ansible-playbook -i "$TARGET_HOST," -b -K ansible/dns-audit.yml
 ansible-playbook -i "$TARGET_HOST," -b -K ansible/dns-audit-pull-merge.yml -e dns_target_host="$TARGET_HOST"
 ```
 
-**3. Proxmox** — **`install`** (optional, for manual on-node use in [hacking.md](hacking.md)); then **resolve** (fetch **`.fw`**, DNS staging, local merge) and **deploy** (upload merged **`.fw`** only):
+**3. Proxmox** — **resolve** (fetch **`.fw`**, DNS staging, local merge) and **deploy** (upload merged **`.fw`** only):
 
 ```bash
-ansible-playbook -i "$PVE_HOST," -b -K ansible/proxmox-update-allowed-ips.yml --tags install   # optional
-
 ansible-playbook -i "$PVE_HOST," -b -K ansible/proxmox-update-allowed-ips.yml --tags resolve \
   -e pve_vmid=100
 

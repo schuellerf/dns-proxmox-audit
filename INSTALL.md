@@ -38,12 +38,11 @@ Default **`ansible_ssh_common_args`:** **`-o BatchMode=yes`**, **`-o StrictHostK
 
 ### 3. Resolve + Proxmox — [ansible/proxmox-update-allowed-ips.yml](ansible/proxmox-update-allowed-ips.yml)
 
-Use **`-i your.pve.node.example.com,`** and **`-e pve_vmid=<guest id>`** (or **`-e pve_vm_fw=/etc/pve/firewall/custom.fw`** to override the path). **`install`** is **optional** for the default Ansible flow (only needed for ad-hoc merge on the node; see [hacking.md](hacking.md)).
+Use **`-i your.pve.node.example.com,`** and **`-e pve_vmid=<guest id>`** (or **`-e pve_vm_fw=/etc/pve/firewall/custom.fw`** to override the path).
 
 | Step | Tag |
 | --- | --- |
 | **Slurp** guest **`.fw`** from **`/etc/pve/firewall/<vmid>.fw`**, write **`.pve-fw.fetched.<vmid>.fw`** on the controller; then **`names-review.txt`** → **`.pve-allowed-staged.txt`**; then local **`proxmox-update-allowed-ips.py --dry-run`** → **`.pve-fw-merged.<vmid>.fw`** | `resolve` |
-| Install `proxmox-update-allowed-ips.py` on the node (manual / on-node workflows) | `install` |
 | Copy merged **`.fw`** to the node, **`pve-firewall compile`**, **`systemctl reload pve-firewall`** | `deploy` |
 
 Typical: **`--tags resolve`** then **`--tags deploy`** after editing **`names-review.txt`**. Defaults: **`dns_audit_names_review`** and **`dns_audit_pve_staged`** (resolve) point to **`$REPO/names-review.txt`** and **`$REPO/.pve-allowed-staged.txt`**; **`dns_audit_pve_merged_fw`** (deploy source) defaults to **`$REPO/.pve-fw-merged.<vmid>.fw`**.
