@@ -16,6 +16,9 @@ _HOURLY_FNAME = re.compile(r"^(\d{10})([+-]\d{4})-dns-names\.txt$")
 
 _NAMES_REVIEW_MARKER = " # last request: "
 
+# Timestamp token after the marker; allows trailing notes (e.g. "…+0200  # my comment").
+_NAMES_REVIEW_TS_PREFIX = re.compile(r"^(\d{10}[+-]\d{4})")
+
 # SRV QNAMEs (e.g. apt mirror discovery): not used for direct A/AAAA egress allowlists.
 _SRV_QNAME_PREFIX = re.compile(r"^_[a-z0-9-]+\._(tcp|udp)\.", re.IGNORECASE)
 
@@ -23,6 +26,7 @@ _SRV_QNAME_PREFIX = re.compile(r"^_[a-z0-9-]+\._(tcp|udp)\.", re.IGNORECASE)
 class NamesReviewEntry(NamedTuple):
     last_request: datetime
     commented_out: bool
+    line_suffix: str = ""
 
 
 def is_allowlist_relevant_name(name: str) -> bool:
@@ -92,27 +96,52 @@ def load_hourly(input_dir: Path) -> dict[str, datetime]:
     return last
 
 
-def _iter_names_review_parsed(lines: list[str]) -> Iterator[tuple[str, datetime, bool]]:
+def _parse_names_review_body(body: str) -> tuple[str, datetime, str] | None:
+    """Parse ``name # last request: <ts>`` plus optional trailing suffix on the line."""
+    if _NAMES_REVIEW_MARKER not in body:
+        return None
+    name, ts_part = body.split(_NAMES_REVIEW_MARKER, 1)
+    name = name.strip().lower().rstrip(".")
+    if not name or "." not in name:
+        return None
+    if not is_allowlist_relevant_name(name):
+        return None
+    ts_rest = ts_part.strip()
+    m = _NAMES_REVIEW_TS_PREFIX.match(ts_rest)
+    if not m:
+        return None
+    ts_s = m.group(1)
+    line_suffix = ts_rest[m.end() :]
+    try:
+        ts = datetime.strptime(ts_s, "%Y%m%d%H%z")
+    except ValueError:
+        return None
+    return name, ts, line_suffix
+
+
+def _parse_names_review_stripped_line(
+    line: str,
+) -> tuple[str, datetime, bool, str] | None:
+    """Parse one stripped non-empty line; None if not a names-review entry."""
+    commented_out = line.startswith("#")
+    body = line[1:].lstrip() if commented_out else line
+    p = _parse_names_review_body(body)
+    if not p:
+        return None
+    name, ts, line_suffix = p
+    return name, ts, commented_out, line_suffix
+
+
+def _iter_names_review_parsed(lines: list[str]) -> Iterator[tuple[str, datetime, bool, str]]:
     for raw in lines:
         line = raw.strip()
         if not line:
             continue
-        commented_out = line.startswith("#")
-        body = line[1:].lstrip() if commented_out else line
-        if _NAMES_REVIEW_MARKER not in body:
+        p = _parse_names_review_stripped_line(line)
+        if not p:
             continue
-        name, ts_part = body.split(_NAMES_REVIEW_MARKER, 1)
-        name = name.strip().lower().rstrip(".")
-        ts_s = ts_part.strip()
-        if not name or "." not in name:
-            continue
-        if not is_allowlist_relevant_name(name):
-            continue
-        try:
-            ts = datetime.strptime(ts_s, "%Y%m%d%H%z")
-        except ValueError:
-            continue
-        yield name, ts, commented_out
+        name, ts, commented_out, line_suffix = p
+        yield name, ts, commented_out, line_suffix
 
 
 def load_names_review(path: Path) -> dict[str, datetime]:
@@ -123,23 +152,37 @@ def load_names_review(path: Path) -> dict[str, datetime]:
     except OSError as e:
         print(f"read {path}: {e}", file=sys.stderr)
         return last
-    for name, ts, commented_out in _iter_names_review_parsed(text.splitlines()):
+    for name, ts, commented_out, _suf in _iter_names_review_parsed(text.splitlines()):
         if not commented_out:
             last[name] = ts
     return last
 
 
-def load_names_review_merge_state(path: Path) -> dict[str, NamesReviewEntry]:
-    """Parse names-review.txt including commented-out lines (FQDN -> entry)."""
+def load_names_review_merge_state(
+    path: Path,
+) -> tuple[dict[str, NamesReviewEntry], list[str]]:
+    """Parse names-review.txt including commented-out lines and non-entry lines.
+
+    Returns (FQDN -> entry, verbatim lines that are not structured names-review rows).
+    """
     out: dict[str, NamesReviewEntry] = {}
+    verbatim: list[str] = []
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError as e:
         print(f"read {path}: {e}", file=sys.stderr)
-        return out
-    for name, ts, commented_out in _iter_names_review_parsed(text.splitlines()):
-        out[name] = NamesReviewEntry(ts, commented_out)
-    return out
+        return out, verbatim
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        p = _parse_names_review_stripped_line(stripped)
+        if p:
+            name, ts, commented_out, line_suffix = p
+            out[name] = NamesReviewEntry(ts, commented_out, line_suffix)
+        else:
+            verbatim.append(raw.rstrip("\r\n"))
+    return out, verbatim
 
 
 def merge_names_review_hourly(
@@ -150,22 +193,34 @@ def merge_names_review_hourly(
     out: dict[str, NamesReviewEntry] = {}
     for name, ts in hourly.items():
         if name in previous:
-            out[name] = NamesReviewEntry(ts, previous[name].commented_out)
+            prev = previous[name]
+            out[name] = NamesReviewEntry(ts, prev.commented_out, prev.line_suffix)
         else:
-            out[name] = NamesReviewEntry(ts, False)
+            out[name] = NamesReviewEntry(ts, False, "")
     for name, ent in previous.items():
         if name not in out:
             out[name] = ent
     return out
 
 
-def write_names_review(path: Path, entries: dict[str, NamesReviewEntry]) -> None:
+def write_names_review(
+    path: Path,
+    entries: dict[str, NamesReviewEntry],
+    verbatim_trailer: list[str] | None = None,
+) -> None:
     lines: list[str] = []
     for n in sorted(entries):
         ent = entries[n]
         body = f"{n} # last request: {format_last_request(ent.last_request)}"
+        if ent.line_suffix:
+            body += ent.line_suffix
         lines.append(f"#{body}" if ent.commented_out else body)
-    data = "\n".join(lines) + ("\n" if lines else "")
+    parts: list[str] = []
+    if lines:
+        parts.append("\n".join(lines))
+    if verbatim_trailer:
+        parts.extend(verbatim_trailer)
+    data = "\n".join(parts) + ("\n" if parts else "")
     path.write_text(data, encoding="utf-8")
 
 

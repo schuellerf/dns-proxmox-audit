@@ -29,12 +29,13 @@ def main() -> int:
         return 1
     last = load_hourly(d)
     out = d / "names-review.txt"
-    previous = (
-        load_names_review_merge_state(out) if out.is_file() else {}
-    )
+    if out.is_file():
+        previous, verbatim_trailer = load_names_review_merge_state(out)
+    else:
+        previous, verbatim_trailer = {}, []
     merged = merge_names_review_hourly(last, previous)
     if not last:
-        if not previous:
+        if not previous and not verbatim_trailer:
             print(
                 "warning: no names merged (empty or no matching files)",
                 file=sys.stderr,
@@ -44,7 +45,7 @@ def main() -> int:
                 "warning: no names from hourly files; names-review kept from existing file only",
                 file=sys.stderr,
             )
-    write_names_review(out, merged)
+    write_names_review(out, merged, verbatim_trailer or None)
     print(f"Wrote {out} ({len(merged)} names)")
     return 0
 
