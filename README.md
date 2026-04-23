@@ -7,8 +7,8 @@ This project intends to learn which DNS names a machine actually queries over ti
 **Three steps:**
 
 1. **Target host (audit):** Log DNS activity and write **names-only** hourly files (FQDNs you observed—no “trust the answer IP from the log” on this machine).
-2. **Pull / merge / fetch:** On the audit host, merge hourly files into **`names-review.txt`**, refresh **`apt-names.txt`** / **`ntp.txt`**, and **`fetch`** all three into the repo root. **Edit `names-review.txt`** after review.
-3. **Resolve and Proxmox:** With **`-i "$PVE_HOST,"`**, **`resolve`** fetches the guest **`.fw`** from the node, runs **`getaddrinfo`** on the controller from **`apt-names.txt`**, **`ntp.txt`**, and **`names-review.txt`** into three staged files, then merges **only** the **`[IPSET apt-names]`**, **`[IPSET ntp-names]`**, and **`[IPSET reviewed-names]`** bodies into **`.pve-fw-merged.<vmid>.fw`**. Every other **`[IPSET …]`** block and the entire **`[RULES]`** section are copied unchanged from the fetched file—you add **`+guest/apt-names`**, **`+guest/ntp-names`**, **`+guest/reviewed-names`** (or not) in Proxmox yourself. See **`.gitignore`** for local-only paths. Review the merged **`.fw`**, then **`deploy`** uploads it, runs **`pve-firewall compile`**, and reloads the firewall.
+2. **Pull / merge / fetch:** On the audit host, merge hourly files into **`names-review.txt`**, refresh **`apt-names.txt`**, **`ntp.txt`**, and **`dns-ips.txt`** (resolver addresses from the target), and **`fetch`** all four into the repo root. **Edit `names-review.txt`** after review.
+3. **Resolve and Proxmox:** With **`-i "$PVE_HOST,"`**, **`resolve`** fetches the guest **`.fw`** from the node, runs **`getaddrinfo`** on the controller from **`apt-names.txt`**, **`ntp.txt`**, and **`names-review.txt`** into three staged files, and copies **`dns-ips.txt`** to a fourth staged file **without** resolution (addresses are already IP literals from the target). It then merges **only** the **`[IPSET apt-names]`**, **`[IPSET ntp-names]`**, **`[IPSET reviewed-names]`**, and **`[IPSET dns-ips]`** bodies into **`.pve-fw-merged.<vmid>.fw`**. Every other **`[IPSET …]`** block and the entire **`[RULES]`** section are copied unchanged from the fetched file—you add **`+guest/apt-names`**, **`+guest/ntp-names`**, **`+guest/reviewed-names`**, **`+guest/dns-ips`** (or not) in Proxmox yourself. See **`.gitignore`** for local-only paths. Review the merged **`.fw`**, then **`deploy`** uploads it, runs **`pve-firewall compile`**, and reloads the firewall.
 
 ## Ansible quick start (three playbooks)
 
@@ -26,7 +26,7 @@ cd /path/to/dns-proxmox-audit
 ansible-playbook -i "$TARGET_HOST," -b -K ansible/dns-audit.yml
 ```
 
-**2. Pull and merge** — on the target: static export + merge hourly names; **fetch** **`names-review.txt`**, **`apt-names.txt`**, and **`ntp.txt`** into the repo (review **`names-review.txt`** before step 3):
+**2. Pull and merge** — on the target: static export + merge hourly names; **fetch** **`names-review.txt`**, **`apt-names.txt`**, **`ntp.txt`**, and **`dns-ips.txt`** into the repo (review **`names-review.txt`** before step 3):
 
 ```bash
 ansible-playbook -i "$TARGET_HOST," -b -K ansible/dns-audit-pull-merge.yml -e dns_target_host="$TARGET_HOST"
@@ -34,7 +34,7 @@ ansible-playbook -i "$TARGET_HOST," -b -K ansible/dns-audit-pull-merge.yml -e dn
 
 **3. Proxmox** — **resolve** (fetch **`.fw`**, DNS staging, local merge) and **deploy** (upload merged **`.fw`** only):
 
-Before running this step, review **`names-review.txt`**, **`apt-names.txt`** and **`ntp.txt`**
+Before running this step, review **`names-review.txt`**, **`apt-names.txt`**, **`ntp.txt`**, and (if you use the set in rules) **`dns-ips.txt`**
 
 ```bash
 ansible-playbook -i "$PVE_HOST," -b -K ansible/proxmox-update-allowed-ips.yml --tags resolve \

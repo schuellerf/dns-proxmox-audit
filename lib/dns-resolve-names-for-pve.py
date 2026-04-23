@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolve hostname lists to IPs and write staged files for proxmox-update-allowed-ips.py (controller)."""
+"""Resolve hostname lists to IPs, stage dns-ips (no GAI), write staged files for PVE merge (controller)."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from dns_audit_names_lib import (  # noqa: E402
     load_names_review,
     load_plain_hostnames,
     write_pve_staged,
+    write_pve_staged_ip_literals,
     write_pve_staged_plain_names,
 )
 
@@ -58,9 +59,21 @@ def main() -> int:
         help="Output: IP lines for [IPSET reviewed-names]",
     )
     ap.add_argument(
+        "--dns-ips",
+        type=Path,
+        default=Path("dns-ips.txt"),
+        help="Input: one address or CIDR per line (DNS resolvers; no resolution on controller)",
+    )
+    ap.add_argument(
+        "--dns-ips-staged",
+        type=Path,
+        default=Path(".pve-dns-ips-staged.txt"),
+        help="Output: IP lines for [IPSET dns-ips]",
+    )
+    ap.add_argument(
         "--ipv4-only",
         action="store_true",
-        help="Only IPv4 addresses from getaddrinfo",
+        help="Only IPv4 addresses from getaddrinfo; for --dns-ips, drop IPv6 lines",
     )
     args = ap.parse_args()
 
@@ -99,6 +112,21 @@ def main() -> int:
         print(
             f"skip reviewed: not a file {args.names_review}; wrote empty {args.pve_staged}",
             file=sys.stderr,
+        )
+
+    if not args.dns_ips.is_file():
+        args.dns_ips_staged.write_text("", encoding="utf-8")
+        print(
+            f"skip dns-ips: not a file {args.dns_ips}; wrote empty {args.dns_ips_staged}",
+            file=sys.stderr,
+        )
+    else:
+        n_dns = write_pve_staged_ip_literals(
+            args.dns_ips_staged, args.dns_ips, ipv4
+        )
+        print(
+            f"Wrote {args.dns_ips_staged} ({n_dns} IP lines) from {args.dns_ips} "
+            "(no getaddrinfo)"
         )
 
     return 0

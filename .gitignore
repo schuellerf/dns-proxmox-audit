@@ -2,8 +2,10 @@ __pycache__
 names-review.txt
 apt-names.txt
 ntp.txt
+dns-ips.txt
 .pve-allowed-staged.txt
 .pve-apt-names-staged.txt
 .pve-ntp-names-staged.txt
+.pve-dns-ips-staged.txt
 .pve-fw.fetched.*.fw
 .pve-fw-merged.*.fw

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import re
 import socket
 import sys
@@ -170,6 +171,57 @@ def write_pve_staged_plain_names(
             continue
         for ip in ips:
             pve_lines.append(f"{ip} # {n}")
+    data = "\n".join(pve_lines) + ("\n" if pve_lines else "")
+    path.write_text(data, encoding="utf-8")
+    return len(pve_lines)
+
+
+def write_pve_staged_ip_literals(
+    path: Path, input_path: Path, ipv4_only: bool
+) -> int:
+    """Read lines with address/CIDR tokens (e.g. dns-ips.txt); no getaddrinfo.
+
+    Preserves a trailing line comment (``#`` …) when present. Drops IPv6 when
+    ``ipv4_only`` is true. Invalid or empty lines are skipped.
+    """
+    pve_lines: list[str] = []
+    if not input_path.is_file():
+        path.write_text("", encoding="utf-8")
+        return 0
+    try:
+        text = input_path.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        print(f"read {input_path}: {e}", file=sys.stderr)
+        path.write_text("", encoding="utf-8")
+        return 0
+    for line in text.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        cmt = ""
+        if "#" in s:
+            s, cmt = s.split("#", 1)
+            s, cmt = s.strip(), cmt.strip()
+        tok = s.split()[0] if s else ""
+        if not tok:
+            continue
+        if "/" in tok:
+            try:
+                net = ipaddress.ip_network(tok, strict=False)
+            except ValueError:
+                continue
+            if ipv4_only and net.version != 4:
+                continue
+            left = str(net)
+        else:
+            try:
+                addr = ipaddress.ip_address(tok)
+            except ValueError:
+                continue
+            if ipv4_only and addr.version == 6:
+                continue
+            left = str(addr)
+        pve_lines.append(f"{left} # {cmt}" if cmt else left)
     data = "\n".join(pve_lines) + ("\n" if pve_lines else "")
     path.write_text(data, encoding="utf-8")
     return len(pve_lines)

@@ -48,7 +48,7 @@ If the unit fails (unknown `LogFilterPatterns=` on older systemd): install [10-d
 
 **Filename pattern:** e.g. `2026032914+0100-dns-names.txt`: wall-clock **start** of the hour, then `strftime("%z")` (no separator before the offset), as in [audit_export_common.filename_for_hour_start](lib/audit_export_common.py). Each file lists **one FQDN per line** (no IPs; used for names-seen-only audit).
 
-**Static lists (not hourly):** `apt-names.txt` and `ntp.txt` in the same directory — **HTTP(S) mirror hostnames** from `/etc/apt` and **NTP peers** from config files (**timesyncd**, chrony, **ntp.conf**), plus **`timedatectl show`** / **`timedatectl timesync-status`** (current **`Server:`**), **`systemd-analyze cat-config systemd/timesyncd.conf`**, and **`chronyc`** if **`chronyd`** is active. **`ntp.txt` lists FQDN-style names only** (at least one dot, not an IP literal); IP-only endpoints are skipped. Regenerated when you run [ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) (static step on the target) or manually below. NTP from DHCP-only setups may still be missing; edge Deb822 or mirror URL formats may need manual checks.
+**Static lists (not hourly):** `apt-names.txt`, `ntp.txt`, and `dns-ips.txt` in the same directory. **`apt-names.txt`:** **HTTP(S) mirror hostnames** from `/etc/apt`. **`ntp.txt`:** **NTP peers** from config files (**timesyncd**, chrony, **ntp.conf**), plus **`timedatectl show`** / **`timedatectl timesync-status`** (current **`Server:`**), **`systemd-analyze cat-config systemd/timesyncd.conf`**, and **`chronyc`** if **`chronyd`** is active. **`ntp.txt` lists FQDN-style names only** (at least one dot, not an IP literal); IP-only endpoints are skipped. **`dns-ips.txt`:** current **DNS resolver** addresses on the target (**`resolvectl`**, with resolv fallbacks); **loopback** and **stub** addresses are omitted. Regenerated when you run [ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) (static step on the target) or manually below. NTP from DHCP-only setups may still be missing; edge Deb822 or mirror URL formats may need manual checks.
 
 **Commands:**
 
@@ -90,7 +90,7 @@ sudo /usr/local/lib/dns-proxmox-audit/static-endpoints-export.py
 
 ## Part 2b — Pull, merge, fetch
 
-[ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) runs **`dns-merge-hourly-names.py`** on the **target**, then **`fetch`es** **`names-review.txt`**, **`apt-names.txt`**, and **`ntp.txt`** into the repo (same basenames by default; fetch uses **`become`** because **`/var/lib/dns-audit`** is **`0750`**). Re-run [ansible/dns-audit.yml](ansible/dns-audit.yml) on the target after pulling new `lib/` files.
+[ansible/dns-audit-pull-merge.yml](ansible/dns-audit-pull-merge.yml) runs **`dns-merge-hourly-names.py`** on the **target**, then **`fetch`es** **`names-review.txt`**, **`apt-names.txt`**, **`ntp.txt`**, and **`dns-ips.txt`** into the repo (same basenames by default; fetch uses **`become`** because **`/var/lib/dns-audit`** is **`0750`**). Re-run [ansible/dns-audit.yml](ansible/dns-audit.yml) on the target after pulling new `lib/` files.
 
 **Manual on the target** (merge hourly files under the audit dir):
 
@@ -98,18 +98,18 @@ sudo /usr/local/lib/dns-proxmox-audit/static-endpoints-export.py
 sudo /usr/local/lib/dns-proxmox-audit/dns-merge-hourly-names.py
 ```
 
-**Manual on the controller** (after review; from repo root — resolves **`apt-names.txt`**, **`ntp.txt`**, **`names-review.txt`** into **`.pve-apt-names-staged.txt`**, **`.pve-ntp-names-staged.txt`**, **`.pve-allowed-staged.txt`**; a missing input file produces an empty staged file for that channel):
+**Manual on the controller** (after review; from repo root — resolves **`apt-names.txt`**, **`ntp.txt`**, **`names-review.txt`** into **`.pve-apt-names-staged.txt`**, **`.pve-ntp-names-staged.txt`**, **`.pve-allowed-staged.txt`**, and stages **`dns-ips.txt`** to **`.pve-dns-ips-staged.txt`** without **getaddrinfo**; a missing input file produces an empty staged file for that channel):
 
 ```bash
 python3 lib/dns-resolve-names-for-pve.py
 # or: python3 lib/dns-resolve-names-for-pve.py --ipv4-only
 ```
 
-Review **`names-review.txt`** (`name # last request: YYYYMMDDHH+0100`), then run the resolver (or [ansible/proxmox-update-allowed-ips.yml](ansible/proxmox-update-allowed-ips.yml) **`--tags resolve`**). Edit the staged files if needed. For APT/NTP hostnames, use **`apt-names.txt`** / **`ntp.txt`** from the target (static export) or re-run the static export. The merge step updates **only** **`[IPSET apt-names]`**, **`[IPSET ntp-names]`**, and **`[IPSET reviewed-names]`** in the guest **`.fw`**; add **`+guest/apt-names`**, **`+guest/ntp-names`**, **`+guest/reviewed-names`** in **`[RULES]`** yourself if you want those sets enforced. See [INSTALL.md](INSTALL.md) and `-e dns_target_host=…` with `-i …,`.
+Review **`names-review.txt`** (`name # last request: YYYYMMDDHH+0100`), then run the resolver (or [ansible/proxmox-update-allowed-ips.yml](ansible/proxmox-update-allowed-ips.yml) **`--tags resolve`**). Edit the staged files if needed. For APT/NTP hostnames, use **`apt-names.txt`** / **`ntp.txt`** from the target (static export) or re-run the static export. **`dns-ips.txt`** is IP literals from the target; optional **`+guest/dns-ips`** in **`[RULES]`** for DNS egress. The merge step updates **only** **`[IPSET apt-names]`**, **`[IPSET ntp-names]`**, **`[IPSET reviewed-names]`**, and **`[IPSET dns-ips]`** in the guest **`.fw`**; add **`+guest/apt-names`**, **`+guest/ntp-names`**, **`+guest/reviewed-names`**, **`+guest/dns-ips`** in **`[RULES]`** yourself if you want those sets enforced. See [INSTALL.md](INSTALL.md) and `-e dns_target_host=…` with `-i …,`.
 
 ## Part 3 — Proxmox guest firewall (run on a Proxmox node)
 
-Copy the script to the node as in the table below if you want to run it on the node. The playbook’s flow is **`--tags resolve`** (fetch guest **`.fw`**, resolve **`apt-names.txt` / `ntp.txt` / `names-review.txt`** on the **controller**, merge **only** the three managed IPSET bodies into **`.pve-fw-merged.<vmid>.fw`**) then **`--tags deploy`** (upload that file, `pve-firewall compile`, `systemctl reload pve-firewall`). **`[RULES]`** and all other **`[IPSET …]`** blocks are copied unchanged from the fetched file. Override merged output with **`-e dns_audit_pve_merged_fw=...`**. Reload after **deploy** ignores failure if the unit does not support reload.
+Copy the script to the node as in the table below if you want to run it on the node. The playbook’s flow is **`--tags resolve`** (fetch guest **`.fw`**, resolve **`apt-names.txt` / `ntp.txt` / `names-review.txt`**, stage **`dns-ips.txt`** without GAI, merge **only** the four managed IPSET bodies into **`.pve-fw-merged.<vmid>.fw`**) then **`--tags deploy`** (upload that file, `pve-firewall compile`, `systemctl reload pve-firewall`). **`[RULES]`** and all other **`[IPSET …]`** blocks are copied unchanged from the fetched file. Override merged output with **`-e dns_audit_pve_merged_fw=...`**. Reload after **deploy** ignores failure if the unit does not support reload.
 
 | Repository file | Install to (example) |
 | --- | --- |
@@ -122,7 +122,8 @@ Copy the script to the node as in the table below if you want to run it on the n
 python3 lib/proxmox-update-allowed-ips.py --firewall /path/to/.pve-fw.fetched.100.fw --dry-run \
   --managed-ipset apt-names:.pve-apt-names-staged.txt \
   --managed-ipset ntp-names:.pve-ntp-names-staged.txt \
-  --managed-ipset reviewed-names:.pve-allowed-staged.txt
+  --managed-ipset reviewed-names:.pve-allowed-staged.txt \
+  --managed-ipset dns-ips:.pve-dns-ips-staged.txt
 ```
 
 **Dry run / apply (legacy: single `[IPSET <name>]`, default `allowed-ips`):**

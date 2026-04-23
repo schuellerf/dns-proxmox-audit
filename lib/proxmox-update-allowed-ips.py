@@ -16,7 +16,7 @@ _TAG = re.compile(r"\s*\(systemd-resolved\)\s*$")
 _SECTION_OPEN = re.compile(r"^(\[[^\]]+\])(.*)$")
 
 # Order for inserting missing managed IPSETs before [RULES]
-_MANAGED_IPSET_ORDER = ("apt-names", "ntp-names", "reviewed-names")
+_MANAGED_IPSET_ORDER = ("apt-names", "ntp-names", "reviewed-names", "dns-ips")
 
 
 def _parse_line(
@@ -157,7 +157,7 @@ def merge_firewall_managed_ipsets(
     strip_resolved: bool,
     sort_keys: bool,
 ) -> str:
-    """Merge only apt-names / ntp-names / reviewed-names; other sections unchanged."""
+    """Merge only apt-names / ntp-names / reviewed-names / dns-ips; other sections unchanged."""
     managed = frozenset(_MANAGED_IPSET_ORDER)
     sections = list(_parse_sections(fw_text))
     in_place: set[str] = set()
@@ -240,7 +240,7 @@ def main() -> int:
         dest="managed_ipsets",
         metavar="NAME:PATH",
         help=(
-            "Managed IPSET (apt-names, ntp-names, reviewed-names) and staged IP file; "
+            "Managed IPSET (apt-names, ntp-names, reviewed-names, dns-ips) and staged IP file; "
             "repeat. When set, only these IPSET bodies are merged; other sections unchanged."
         ),
     )
