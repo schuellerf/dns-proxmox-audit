@@ -18,7 +18,7 @@
 | [lib/dns_audit_names_lib.py](lib/dns_audit_names_lib.py) | `/usr/local/lib/dns-proxmox-audit/dns_audit_names_lib.py` |
 | [lib/dns-merge-hourly-names.py](lib/dns-merge-hourly-names.py) | `/usr/local/lib/dns-proxmox-audit/dns-merge-hourly-names.py` |
 | [lib/dns-hourly-export.py](lib/dns-hourly-export.py) | `/usr/local/lib/dns-proxmox-audit/dns-hourly-export.py` |
-| [lib/static-endpoints-export.py](lib/static-endpoints-export.py) | `/usr/local/lib/dns-proxmox-audit/static-endpoints-export.py` (APT + NTP lists: `/etc`, **`timedatectl`**, **`systemd-analyze cat-config`**, **chronyc** if **chronyd** is active) |
+| [lib/static-endpoints-export.py](lib/static-endpoints-export.py) | `/usr/local/lib/dns-proxmox-audit/static-endpoints-export.py` (APT + NTP lists: `/etc`, **`timedatectl`**, **`systemd-analyze cat-config`**, **chronyc** if **chronyd** is active; **`ntp.txt`** is **FQDN-only**, IP-only peers omitted) |
 | [systemd/dns-hourly-export.service](systemd/dns-hourly-export.service), [systemd/dns-hourly-export.timer](systemd/dns-hourly-export.timer) | `/etc/systemd/system/` |
 | [systemd/tmpfiles.d/dns-audit.conf](systemd/tmpfiles.d/dns-audit.conf) | `/etc/tmpfiles.d/dns-audit.conf` |
 

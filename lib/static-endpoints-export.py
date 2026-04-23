@@ -4,11 +4,15 @@
 Reads /etc/apt and NTP-related config files, then augments NTP peers from runtime when
 available: timedatectl show / timesync-status, systemd-analyze cat-config, and chronyc
 if chronyd is active. Intended to run on the target host (root).
+
+``ntp.txt`` lists FQDN-style hostnames only (at least one dot, not an IP literal); IP-only
+NTP peers from config or runtime are omitted.
 """
 
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import os
 import re
 import subprocess
@@ -34,9 +38,27 @@ _RE_CHRONY_REF_HOST = re.compile(r"\(([^)]+)\)\s*$")
 _APT_DIRS = (Path("/etc/apt/sources.list"), Path("/etc/apt/sources.list.d"))
 
 
-def _add_ntp_peer(out: set[str], tok: str) -> None:
+def _is_ip_literal(tok: str) -> bool:
+    t = tok.strip()
+    if not t:
+        return False
+    if t.startswith("[") and t.endswith("]"):
+        t = t[1:-1]
+    t = t.split("%", 1)[0]
+    try:
+        ipaddress.ip_address(t)
+        return True
+    except ValueError:
+        return False
+
+
+def _add_ntp_hostname(out: set[str], tok: str) -> None:
     tok = tok.strip()
     if not tok or tok.startswith("#"):
+        return
+    if _is_ip_literal(tok):
+        return
+    if "." not in tok:
         return
     out.add(tok.lower() if re.match(r"^[a-z0-9._-]+$", tok, re.I) else tok)
 
@@ -73,7 +95,7 @@ def _merge_timedatectl_show(out: set[str]) -> None:
         if key not in ("NTPServers", "FallbackNTP") or not val:
             continue
         for tok in val.split():
-            _add_ntp_peer(out, tok)
+            _add_ntp_hostname(out, tok)
 
 
 def _merge_timedatectl_timesync_status(out: set[str]) -> None:
@@ -87,7 +109,7 @@ def _merge_timedatectl_timesync_status(out: set[str]) -> None:
     if "(" in raw:
         raw = raw.split("(", 1)[0].strip()
     if raw:
-        _add_ntp_peer(out, raw)
+        _add_ntp_hostname(out, raw)
 
 
 def _merge_systemd_analyze_timesyncd(out: set[str]) -> None:
@@ -99,7 +121,7 @@ def _merge_systemd_analyze_timesyncd(out: set[str]) -> None:
         m = _TIMESYNC_NTP.match(line)
         if m:
             for tok in m.group(2).split():
-                _add_ntp_peer(out, tok)
+                _add_ntp_hostname(out, tok)
 
 
 def _chronyd_active() -> bool:
@@ -108,7 +130,7 @@ def _chronyd_active() -> bool:
 
 
 def _merge_chronyc_sources(out: set[str]) -> None:
-    text = _run_text(["chronyc", "-n", "sources"])
+    text = _run_text(["chronyc", "sources"])
     if not text:
         return
     for line in text.splitlines():
@@ -124,11 +146,11 @@ def _merge_chronyc_sources(out: set[str]) -> None:
         name = parts[1]
         if name.startswith("#"):
             continue
-        _add_ntp_peer(out, name)
+        _add_ntp_hostname(out, name)
 
 
 def _merge_chronyc_tracking(out: set[str]) -> None:
-    text = _run_text(["chronyc", "-n", "tracking"])
+    text = _run_text(["chronyc", "tracking"])
     if not text:
         return
     for line in text.splitlines():
@@ -137,8 +159,8 @@ def _merge_chronyc_tracking(out: set[str]) -> None:
         m = _RE_CHRONY_REF_HOST.search(line)
         if m:
             host = m.group(1).strip()
-            if host and not re.match(r"^[0-9a-fA-F.]+$", host):
-                _add_ntp_peer(out, host)
+            if host:
+                _add_ntp_hostname(out, host)
         break
 
 
@@ -225,7 +247,7 @@ def _parse_timesyncd(path: Path) -> set[str]:
                 for tok in m.group(2).split():
                     tok = tok.strip()
                     if tok:
-                        out.add(tok.lower() if re.match(r"^[a-z0-9._-]+$", tok, re.I) else tok)
+                        _add_ntp_hostname(out, tok)
     except OSError as e:
         print(f"ntp: skip {path}: {e}", file=sys.stderr)
     return out
@@ -246,7 +268,7 @@ def _parse_chrony_or_ntp(path: Path) -> set[str]:
                 if h and not h.startswith("-"):
                     if re.match(r"^[\[0-9a-fA-F:.]+%[a-z0-9_-]+]$", h):
                         continue
-                    out.add(h.lower() if re.match(r"^[a-z0-9._-]+$", h, re.I) else h)
+                    _add_ntp_hostname(out, h)
     except OSError as e:
         print(f"ntp: skip {path}: {e}", file=sys.stderr)
     return out
