@@ -1,3 +1,8 @@
+# PROJECT ARCHIVED
+
+This was just an experiment, please rather checkout 
+https://github.com/schuellerf/proxmox-dns-firewall-lockdown
+
 # dns-proxmox-audit
 
 This project intends to learn which DNS names a machine actually queries over time, turn that into a **reviewed list of IP addresses** on a trusted host, and feed that into a **Proxmox VM outgoing firewall** so you can **tighten policy—mainly for outgoing traffic** (permitted destination IPs on allowed outgoing rules) instead of a wide open egress path.
